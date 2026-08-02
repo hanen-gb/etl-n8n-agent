@@ -1,20 +1,97 @@
-# Agent d'automatisation de processus ETL — Stage Sofrecom Tunisie
+# ETL Process Automation Agent — Sofrecom Tunisia Internship
 
-Agent agentique n8n pour le traitement de fichiers Excel : sélection d'un fichier source dans Google Drive, transformations réelles (nettoyage, formats, dates, doublons, colonnes calculées, tableaux croisés dynamiques) via l'API Google Sheets sur une copie de travail, réponses aux questions/statistiques calculées de façon déterministe, et chargement final multi-destination (local, Google Drive, SharePoint).
+Agentic conversational agent (n8n) that automates end-to-end Excel file processing: selecting a source file from Google Drive, applying real transformations (cleaning, formatting, dates, deduplication, calculated columns, pivot tables) on a **working copy** Google Sheet, answering questions/statistics computed deterministically (no numbers invented by the LLM), and final multi-destination loading (Local, Google Drive, SharePoint).
 
-## Contenu
+Project built as part of an internship at **Sofrecom Tunisia**.
 
-- `Flowrecom ETL — Excel Agentic v2.json` — workflow n8n principal (à importer dans n8n).
-- `Flowrecom ETL — BigQuery Native + MCP Agents (2).json` — version précédente du workflow (conservée pour référence).
-- `etl_sessions.sql` — schéma de la table Postgres qui garde l'état de session (fichier courant, copie de travail, spreadsheet actif).
+## Table of contents
 
-## Prérequis avant import
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Repository contents](#repository-contents)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+- [Known limitations](#known-limitations)
+- [Detailed documentation](#detailed-documentation)
 
-1. Une instance n8n (auto-hébergée) avec les credentials suivantes configurées : Groq, Google Drive OAuth2, Google Sheets OAuth2, Google OAuth2 (générique), Postgres.
-2. Exécuter `etl_sessions.sql` dans la base Postgres utilisée par les nœuds de traçabilité.
-3. Créer dans Google Drive : un dossier source pour les fichiers Excel bruts, et deux sous-dossiers `Working` / `Final`. Remplacer les placeholders `<WORKING_FOLDER_ID>` / `<FINAL_FOLDER_ID>` dans le JSON par leurs IDs réels.
-4. (Optionnel) Configurer une credential SharePoint pour la destination de chargement correspondante.
+## Overview
+
+The user chats with the agent (n8n chat or webhook) in natural language. A router agent classifies each message into an intent, then routes to the matching sub-flow:
+
+| Intent | What it does |
+|---|---|
+| `select_file` | Lists the raw Excel files available in Drive, or — if a name is given — creates a working copy and converts it to a Google Sheet |
+| `transform` | Applies a real transformation on the working copy: text cleaning (upper/lower/proper case), date normalization, deduplication, calculated column, cell formatting, or pivot table |
+| `question` | Answers a numeric question (count, sum, average, distinct values...) using statistics computed in JS on the real data — the LLM only phrases the answer |
+| `visualisation` | Proposes a chart configuration from the same real statistics |
+| `consult` | Returns the working-copy Google Sheet link at any time, for visual verification |
+| `loading` | Exports the working copy to a clean `.xlsx` and delivers it to 3 destinations: local disk, `Final` Drive folder, SharePoint |
+| `sharing` | Prepares a share message (email, Slack, Teams...) |
+| `conversation` | Regular conversational exchange |
+
+Each session's state (selected file, current working copy, status) is kept in a Postgres table (`etl_sessions`), so a conversation can resume at any time without losing track of the file being processed.
 
 ## Architecture
 
-Un agent routeur classifie l'intention de chaque message (`select_file`, `transform`, `question`, `visualisation`, `consult`, `loading`, `sharing`, `conversation`) et route vers le sous-flux correspondant. L'état de la session (fichier sélectionné, copie de travail) est conservé dans Postgres entre les messages.
+```mermaid
+flowchart TD
+    A[Chat / Webhook] --> B[session id]
+    B --> C[Router agent - Groq]
+    C --> D{Intent switch}
+    D -->|select_file| E[Copy Drive file -> Google Sheet]
+    D -->|transform| F[Parser agent -> 6 Sheets API tools]
+    D -->|question| G[Deterministic stats -> Answer agent]
+    D -->|visualisation| H[Deterministic stats -> Chart agent]
+    D -->|consult| I[Google Sheet link]
+    D -->|loading| J[Export xlsx -> Local + Drive Final + SharePoint]
+    D -->|sharing| K[Sharing agent]
+    D -->|conversation| L[Conversational agent]
+    E & F & G & H & I & J & K & L --> M[Final response aggregator]
+    M --> N[User response]
+
+    O[(Postgres: etl_sessions / etl_tracabilite)] -.-> E
+    O -.-> F
+    O -.-> G
+    O -.-> H
+    O -.-> I
+    O -.-> J
+```
+
+Full technical detail (nodes per branch, the 6 transformation tools' schema, Google Sheets API request shapes): see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Repository contents
+
+```
+Flowrecom ETL — Excel Agentic v2.json          Main n8n workflow (import this)
+Flowrecom ETL — BigQuery Native + MCP Agents (2).json   Previous version (kept for historical reference)
+etl_sessions.sql                                Postgres schema for session state
+docs/ARCHITECTURE.md                            Node-by-node technical detail
+docs/SETUP.md                                   Installation and configuration guide
+docs/USAGE.md                                   Example conversations per intent
+```
+
+## Quick start
+
+1. Self-hosted n8n (tested on n8n 2.17.7).
+2. n8n credentials to configure: Groq, Google Drive OAuth2, Google Sheets OAuth2, Google OAuth2 (generic), Postgres.
+3. Run `etl_sessions.sql` against the Postgres database in use.
+4. In Google Drive, create a source folder (raw Excel files) plus 2 subfolders `Working` and `Final`.
+5. Import `Flowrecom ETL — Excel Agentic v2.json` into n8n, replace the `<WORKING_FOLDER_ID>` / `<FINAL_FOLDER_ID>` / `<SHAREPOINT_SITE_ID>` placeholders.
+
+Full step-by-step guide: [`docs/SETUP.md`](docs/SETUP.md).
+
+## Usage
+
+Example messages to send to the agent, and the expected behavior for each: [`docs/USAGE.md`](docs/USAGE.md).
+
+## Known limitations
+
+- The pivot table action (`pivot_table`) manually builds the Google Sheets API's native `pivotTable` object — worth validating on a real case and adjusting if the returned format differs.
+- The SharePoint destination requires a separate OAuth2 credential (Azure AD, Graph permission `Sites.ReadWrite.All`) — the branch is wired but inactive until that credential exists.
+- Writing the final file locally requires `N8N_RESTRICT_FILE_ACCESS_TO` to allow the output folder (n8n restricts disk access by default).
+
+## Detailed documentation
+
+- [Technical architecture](docs/ARCHITECTURE.md)
+- [Setup guide](docs/SETUP.md)
+- [Usage examples](docs/USAGE.md)
