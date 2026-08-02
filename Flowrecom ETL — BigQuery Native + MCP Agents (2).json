@@ -1,0 +1,2302 @@
+{
+  "name": "Flowrecom ETL — BigQuery Native + MCP Agents",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# 🤖 FLOWRECOM — BigQuery + Gemini Embeddings\n\n## Architecture complète\n- ✅ Nœuds natifs BigQuery (Insert + Execute Query)\n- ✅ Embeddings Gemini text-embedding-004 → pgvector\n- ✅ Agent Analyse : BigQuery Tool + Vector Store Tool\n- ✅ PostgreSQL pour sessions + traçabilité + embeddings\n- ✅ BigQuery pour données Excel volumineuses\n- ✅ Groq pour agents LLM (rapide + gratuit)\n\n## Credentials à configurer\n- `BigQuery account` → Google BigQuery OAuth2\n- `Postgres account` → PostgreSQL/Supabase\n- `Groq account` → Groq API Key\n- `Google Gemini(PaLM) Api account 6` → Gemini (embeddings)\n- `Google Drive account` → Drive OAuth2\n- `Google Sheets account 2` → Sheets OAuth2\n- `Google account` → OAuth2\n\n## Variables d'environnement n8n\nSettings → Variables :\n- BIGQUERY_PROJECT_ID = ton-project-id\n- BIGQUERY_DATASET = flowrecom_dataset",
+        "height": 520,
+        "width": 1000,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        11456,
+        9136
+      ],
+      "typeVersion": 1,
+      "id": "ecd2779e-064d-48c8-843e-82baa1dfd406",
+      "name": "📋 Architecture BigQuery Native"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        11888,
+        10528
+      ],
+      "id": "9dc0a67f-730a-48ad-a0b3-8c082f2620ba",
+      "name": "When chat message received",
+      "webhookId": "b06a6145-3f08-495a-aaa4-55849eccaa09"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "flowrecom-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        11888,
+        10736
+      ],
+      "id": "902f5cd9-4d9b-423d-bc62-b54ae87459ba",
+      "name": "Webhook",
+      "webhookId": "flowrecom-webhook-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst sessionId = body.sessionId || 'session_' + Date.now();\nconst chatInput = body.chatInput || body.message || '';\nconst uploadedFile = body.uploadedFile || null;\nreturn [{ json: { sessionId, chatInput, uploadedFile, timestamp: new Date().toISOString() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12368,
+        10640
+      ],
+      "id": "46939b49-c6d6-42d0-bc51-52c3c768f4db",
+      "name": "session id"
+    },
+    {
+      "parameters": {
+        "content": "# 🧭 ORCHESTRATEUR\n## Fonction\nClassifie l'intention utilisateur\net route vers le bon sous-workflow.\n## Config\n- ✅ Groq (rapide + gratuit)\n- ✅ Trace dans PostgreSQL",
+        "height": 220,
+        "width": 500,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        12560,
+        10272
+      ],
+      "typeVersion": 1,
+      "id": "ab74c73e-b572-4749-b1d9-e6f420fd8d18",
+      "name": "📋 Note Orchestrateur"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Réponds uniquement avec ce JSON, rien d'autre :\n{\"chatInput\":\"{{ $json.chatInput }}\",\"intention\":\"INTENTION\",\"sessionId\":\"{{ $json.sessionId }}\"}\n\nRemplace INTENTION :\n- choix_fichier → veut ouvrir/analyser/choisir un fichier\n- preparation → donne un nom de fichier précis\n- question → demande calcul/analyse sur données chargées\n- visualisation → demande graphe/chart\n- sharing → veut partager/envoyer\n- loading → veut sauvegarder/exporter\n- conversation → tout le reste\n\nMessage : {{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "Tu es un classificateur. Réponds UNIQUEMENT avec un JSON valide."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        12864,
+        10640
+      ],
+      "id": "e5bc5381-8b93-4107-b3c6-4cc7f79f4d44",
+      "name": "agent parent Router"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        12960,
+        10912
+      ],
+      "id": "dda7628e-e4a1-41e7-b0f0-11a3eba6c32e",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nconst cleaned = raw.replace(/```json\\s*/g,'').replace(/\\s*```/g,'').trim();\ntry { return [{ json: JSON.parse(cleaned) }]; } catch(e) { return [{ json: { intention: 'conversation', chatInput: items[0].json.chatInput || '', sessionId: items[0].json.sessionId || '' } }]; }"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13360,
+        10640
+      ],
+      "id": "ebfb08eb-2463-45b9-a367-be1ac25af7b3",
+      "name": "text->json"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, intention, input_data, status, created_at) VALUES ($1, 'orchestrateur', 'router_dispatch', $2, $3, 'OK', NOW()) ON CONFLICT DO NOTHING;",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ $json.intention }}",
+            "={{ $json.chatInput }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        13664,
+        10576
+      ],
+      "id": "f5500f5c-48a1-44e7-a46c-39bac988ea5a",
+      "name": "💾 Trace Orchestrateur → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "choix_fichier",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "choisir fichier"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "conversation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "conversation"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "preparation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "preparation"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "question",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "question"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "visualisation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "visualisation"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "sharing",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "sharing"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "loading",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "loading"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        14064,
+        10640
+      ],
+      "id": "29903251-5f41-4cec-b4d0-58760630fda9",
+      "name": "analyse,choix,ETL,conversation ?"
+    },
+    {
+      "parameters": {
+        "content": "# 💬 CONVERSATION\n## Fonction\nAgent conversationnel Flowrecom.\nSalutations, questions générales.\n## Config\n- ✅ Groq\n- ✅ Mémoire session",
+        "height": 200,
+        "width": 450,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        9248
+      ],
+      "typeVersion": 1,
+      "id": "d5537b04-9970-4cff-892c-8e176a901f16",
+      "name": "📋 Note Conversation"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu es Flowrecom 🤖, agent conversationnel Sofrecom Tunisie 🇹🇳.\nMessage : {{ $json.chatInput }}\nRéponds en JSON : {\"response\":\"<réponse ≤500 chars avec emojis>\"}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        9536
+      ],
+      "id": "7504628d-d374-473c-b61a-6db3593c25be",
+      "name": "agent de conversation"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        14736,
+        9744
+      ],
+      "id": "59a07c71-608b-49b2-a9de-4c400c547c84",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.sessionId }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        15056,
+        9744
+      ],
+      "id": "f09cb14c-7b8c-41db-a00e-82e11bba385b",
+      "name": "Simple Memory1"
+    },
+    {
+      "parameters": {
+        "jsCode": "let out = 'Désolé, je n\\'ai pas compris.'; const o = items[0].json.output; if(o){ try { const p = JSON.parse(o.replace(/```json|```/g,'').trim()); out = p.response || o; } catch(e){ out = o; } } return [{ json: { text: out, type: 'conversation', sessionId: items[0].json.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15568,
+        9536
+      ],
+      "id": "eefe21f1-cec3-4b43-8c0a-b7712c093906",
+      "name": "parser"
+    },
+    {
+      "parameters": {
+        "content": "# 📁 SÉLECTION FICHIER\n## Fonction\nListe les fichiers Excel dans\nGoogle Drive dossier Flowrecom\net demande le choix à l'utilisateur.\n## Config\n- ✅ Google Drive OAuth2\n- Dossier ID : 11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy",
+        "height": 240,
+        "width": 500,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        10240
+      ],
+      "typeVersion": 1,
+      "id": "2c753f5c-2625-4a98-8099-5c2c642341dd",
+      "name": "📋 Note Sélection"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "='11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy' in parents and trashed=false",
+        "filter": {
+          "driveId": {
+            "mode": "list",
+            "value": "My Drive"
+          },
+          "folderId": {
+            "__rl": true,
+            "value": "11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy",
+            "mode": "list",
+            "cachedResultName": "Flowrecom"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        14864,
+        10448
+      ],
+      "id": "c08dd9eb-ca0d-4846-9407-076f031b0cec",
+      "name": "Search files and folders",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YbmaHFZdRHuKkPFU",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = [];\nfor (const item of $input.all()) {\n  if (item.json.name && item.json.id) files.push({ name: item.json.name, id: item.json.id });\n}\nconst excelFiles = files.filter(f => f.name.endsWith('.xlsx') || f.name.endsWith('.xls') || f.name.endsWith('.csv'));\nconst fileList = excelFiles.map((f, i) => `${i+1}. 📄 ${f.name}`).join('\\n');\nconst sessionId = $('analyse,choix,ETL,conversation ?').first().json.sessionId;\nreturn [{ json: { text: `📂 Fichiers disponibles :\\n\\n${fileList}\\n\\nLequel voulez-vous analyser ?`, files: excelFiles, type: 'choix_fichier', sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14992,
+        10544
+      ],
+      "id": "14f64884-6245-4b3e-9ee7-3e800c10fb0f",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "content": "# 🔧 EXTRACTION → BIGQUERY NATIF\n## Flux\n1. Recherche fichier Drive\n2. Télécharge + Convertit en Sheets\n3. Extrait liste des feuilles\n4. Loop feuille par feuille\n5. **INSERT natif BigQuery** (nœud natif)\n6. Stats via Execute Query BigQuery\n\n## Config BigQuery\n- Credential : `BigQuery account`\n- Project ID : variable BIGQUERY_PROJECT_ID\n- Dataset : flowrecom_dataset\n- Table : excel_data\n\n## Schema table excel_data\n```\nsession_id : STRING\nfile_name : STRING\nsheet_name : STRING\nrow_index : INTEGER\nrow_data : STRING\nis_cleaned : BOOLEAN\ncreated_at : TIMESTAMP\n```",
+        "height": 460,
+        "width": 650,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14256,
+        11648
+      ],
+      "typeVersion": 1,
+      "id": "f6db0c90-3d8a-4e23-aac0-208b9afb5827",
+      "name": "📋 Note Extraction BigQuery Natif"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fileName = items[0].json.chatInput.trim();\nreturn [{ json: { fileName, intention: items[0].json.intention, sessionId: items[0].json.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        12048
+      ],
+      "id": "4e6c3c2e-3fd9-475c-9c23-a2a47465bf7f",
+      "name": "extraire nom de fichier"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "='11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy' in parents and name = '{{ $json.fileName }}' and trashed=false",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy",
+            "mode": "list",
+            "cachedResultName": "Flowrecom"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        15264,
+        12048
+      ],
+      "id": "dc48568f-ff69-467d-a122-1c4da32513bc",
+      "name": "extraire seulemnt le fichier excel choisi",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YbmaHFZdRHuKkPFU",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data",
+          "googleFileConversion": {
+            "conversion": {
+              "sheetsToFormat": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        15328,
+        12432
+      ],
+      "id": "e733b861-b3b9-4513-8040-0a4353cb17c6",
+      "name": "telelcharger le fichier a partir son id1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YbmaHFZdRHuKkPFU",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.id }}/copy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"convert\": true, \"mimeType\": \"application/vnd.google-apps.spreadsheet\", \"parents\": [\"11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy\"]}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        15520,
+        12528
+      ],
+      "id": "c76bafb5-cf58-4ed0-a300-acfafe4b4950",
+      "name": "convert to google sheet1",
+      "credentials": {
+        "googleOAuth2Api": {
+          "id": "xTc2HT89j5dzk5hs",
+          "name": "Google account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const spreadsheetId = items[0].json.id;\nif (!spreadsheetId) throw new Error('Conversion échouée');\nreturn [{ json: { spreadsheetId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15920,
+        12528
+      ],
+      "id": "e0483794-a148-4691-ae94-c316917e085c",
+      "name": "extraire spreadsheet id"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}?fields=sheets.properties",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16320,
+        12528
+      ],
+      "id": "f4d7768b-2d32-4ec5-9f5e-8fe09ec9df35",
+      "name": "extract sheet ids1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sheets = items[0].json.sheets || [];\nif (sheets.length === 0) throw new Error('Aucune feuille trouvée');\nconst spreadsheetId = $('extraire spreadsheet id').first().json.spreadsheetId;\nreturn sheets.map(s => ({\n  json: { spreadsheetId, sheetName: s.properties.title, sheetId: s.properties.sheetId, totalRows: s.properties.gridProperties.rowCount || 1000 }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16720,
+        12528
+      ],
+      "id": "eafcd8db-399c-4488-8943-2b82bcf234d3",
+      "name": "retourne noms de sheets1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        17136,
+        12528
+      ],
+      "id": "88754044-ecf6-49ac-893f-d47dcb4ec81f",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.sheetName) }}?majorDimension=ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        17120,
+        12320
+      ],
+      "id": "bf831f2c-320f-401c-96f2-e2a20581cf68",
+      "name": "HTTP Request1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst range = data.range || '';\nconst sheetName = range.split('!')[0].replace(/'/g, '') || 'sheet';\nconst values = data.values || [];\n\nif (values.length < 2) return [{ json: {\n  session_id: 'empty', sheet_name: sheetName, row_index: 0,\n  row_data: '{}', is_cleaned: false, file_name: 'empty',\n  created_at: new Date().toISOString()\n}}];\n\nconst headers = values[0];\nconst dataRows = values.slice(1);\n\nlet sessionId = 'unknown';\nlet fileName = 'unknown';\ntry { sessionId = $('session id').first().json.sessionId; } catch(e) {}\ntry { fileName = $('extraire nom de fichier').first().json.fileName; } catch(e) {}\n\nreturn dataRows.map((row, idx) => {\n  const obj = {};\n  headers.forEach((h, i) => {\n    const key = String(h).replace(/[^a-zA-Z0-9_]/g, '_');\n    obj[key] = row[i] !== undefined ? String(row[i]) : '';\n  });\n  return {\n    json: {\n      session_id: sessionId,\n      file_name: fileName,\n      sheet_name: sheetName,\n      row_index: idx,\n      row_data: JSON.stringify(obj),\n      is_cleaned: false,\n      created_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17616,
+        12448
+      ],
+      "id": "4b4c84b7-dd3e-4f1a-a822-03207e95e65b",
+      "name": "🔧 Préparer lignes pour BigQuery"
+    },
+    {
+      "parameters": {
+        "content": "# 🚀 INSERT BIGQUERY NATIF\n## Configuration du nœud\n- **Resource** : Table Row\n- **Operation** : Insert\n- **Project ID** : {{ $env.BIGQUERY_PROJECT_ID }}\n- **Dataset ID** : flowrecom_dataset\n- **Table ID** : excel_data\n- Les colonnes sont mappées automatiquement\n\n## Credential\n→ `BigQuery account` (Google BigQuery OAuth2)\n→ Même compte Google que Drive/Sheets",
+        "height": 300,
+        "width": 580,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        17664,
+        12048
+      ],
+      "typeVersion": 1,
+      "id": "7946fb8c-a959-4515-9e60-b233e68c2eb0",
+      "name": "📋 Note BigQuery Insert Natif"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "insert",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "datasetId": {
+          "__rl": true,
+          "value": "flowrecom_dataset",
+          "mode": "list",
+          "cachedResultName": "flowrecom_dataset"
+        },
+        "tableId": {
+          "__rl": true,
+          "value": "excel_raw_data",
+          "mode": "list",
+          "cachedResultName": "excel_raw_data"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2,
+      "position": [
+        18032,
+        12544
+      ],
+      "id": "d1578b7c-e734-4baa-9ef8-9c40006c3a31",
+      "name": "🚀 BigQuery Insert Natif",
+      "credentials": {
+        "googleApi": {
+          "id": "JZ5hckDRTKCHrLo2",
+          "name": "Google BigQuery account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sessionId = $('session id').first().json.sessionId || 'unknown';\nreturn [{ json: { sessionId, status: 'extraction_complete', message: 'Toutes les lignes insérées dans BigQuery' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18656,
+        12528
+      ],
+      "id": "bf17bdff-2cdc-4e79-a83c-5b99368e1a4a",
+      "name": "✅ Fin Extraction"
+    },
+    {
+      "parameters": {
+        "content": "# 📊 STATS BIGQUERY — Execute Query Natif\n## Config\n- **Operation** : Execute Query\n- **Project ID** : {{ $env.BIGQUERY_PROJECT_ID }}\n- **Query** : SQL standard BigQuery\n\n## Credential\n→ `BigQuery account`",
+        "height": 220,
+        "width": 520,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        18864,
+        12240
+      ],
+      "typeVersion": 1,
+      "id": "96f43a86-efad-4bd6-820f-0ac3b6fcd39a",
+      "name": "📋 Note BigQuery Execute Query"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "sqlQuery": "SELECT sheet_name, COUNT(*) as total_rows, COUNT(DISTINCT row_data) as unique_rows FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` WHERE session_id = '{{ $json.sessionId }}' GROUP BY sheet_name ORDER BY sheet_name",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2,
+      "position": [
+        19136,
+        12528
+      ],
+      "id": "931a3b26-608b-499b-b894-7a6b1a0444f9",
+      "name": "📊 BigQuery Stats Extraction",
+      "credentials": {
+        "googleApi": {
+          "id": "JZ5hckDRTKCHrLo2",
+          "name": "Google BigQuery account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'extraction', 'extraction_bigquery', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({total_sheets: $json.total_sheets, total_rows: $json.total_rows, storage: 'BigQuery'}) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        19936,
+        12528
+      ],
+      "id": "1a6a878d-5c0b-4fb1-99a0-457d3641a801",
+      "name": "💾 Trace Extraction → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# 🧹 CLEANING BIGQUERY + AGENT LLM\n## Phase 1 — BigQuery Execute Query (SQL)\n1. Stats avant cleaning\n2. Détection anomalies (nulls, doublons)\n3. Marquer is_cleaned = true\n4. Échantillon pour LLM\n\n## Phase 2 — Agent LLM avec Tool PostgreSQL\nL'agent peut interroger la BDD directement\npour calculer des KPIs supplémentaires !\n\n## Config\n- ✅ BigQuery Execute Query natif\n- ✅ Groq pour l'agent\n- ✅ Tool PostgreSQL MCP pour requêtes dynamiques",
+        "height": 380,
+        "width": 680,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14256,
+        13248
+      ],
+      "typeVersion": 1,
+      "id": "c2d67821-edf5-4490-8410-40b385759cfd",
+      "name": "📋 Note Cleaning BigQuery Natif"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sessionId = $('session id').first().json.sessionId || 'unknown';\nreturn [{ json: { sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        13744
+      ],
+      "id": "266411f8-b8e4-4eee-863d-0ee60fa57f5c",
+      "name": "🔧 Préparer Cleaning"
+    },
+    {
+      "parameters": {
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "sqlQuery": "SELECT COUNT(*) as total_rows, COUNT(DISTINCT row_data) as unique_rows, COUNTIF(row_data = '{}' OR row_data = '') as empty_rows, COUNT(DISTINCT sheet_name) as total_sheets FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` WHERE session_id = '{{ $json.sessionId }}' AND is_cleaned = false",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2,
+      "position": [
+        15264,
+        13744
+      ],
+      "id": "70faafc4-4294-44a3-9b50-70608c7cdd5f",
+      "name": "📊 BigQuery Stats avant cleaning"
+    },
+    {
+      "parameters": {
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "sqlQuery": "SELECT sheet_name, JSON_VALUE(row_data, '$.Canal') as canal, JSON_VALUE(row_data, '$.statut') as statut, COUNT(*) as count FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` WHERE session_id = '{{ $('🔧 Préparer Cleaning').first().json.sessionId }}' GROUP BY sheet_name, canal, statut LIMIT 50",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2,
+      "position": [
+        15664,
+        13744
+      ],
+      "id": "cb28c3d6-03fe-44af-95b6-b8ac6729b776",
+      "name": "🔍 BigQuery Détecter Anomalies"
+    },
+    {
+      "parameters": {
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "sqlQuery": "SELECT sheet_name, row_index, row_data FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` WHERE session_id = '{{ $('🔧 Préparer Cleaning').first().json.sessionId }}' ORDER BY sheet_name, row_index LIMIT 20",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2,
+      "position": [
+        15664,
+        13936
+      ],
+      "id": "d38e86f2-472e-4850-a6b1-c867bebfae50",
+      "name": "📋 BigQuery Échantillon LLM"
+    },
+    {
+      "parameters": {
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "sqlQuery": "UPDATE `n8nintegration-462721.flowrecom_dataset.excel_raw_data` SET is_cleaned = true WHERE session_id = '{{ $('🔧 Préparer Cleaning').first().json.sessionId }}'",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        13744
+      ],
+      "id": "1643b6ca-db6e-49d5-a103-cf801e417ad8",
+      "name": "✅ BigQuery Marquer Cleaned"
+    },
+    {
+      "parameters": {
+        "jsCode": "const statsBefore = items.find(i => i.json.total_rows !== undefined)?.json || $('📊 BigQuery Stats avant cleaning').item.json;\nconst anomalies = $('🔍 BigQuery Détecter Anomalies').all().map(i => i.json);\nconst sample = $('📋 BigQuery Échantillon LLM').all().map(i => i.json);\nconst sessionId = $('🔧 Préparer Cleaning').item.json.sessionId;\nreturn [{ json: { stats_before: statsBefore, anomalies, sample, sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16464,
+        13744
+      ],
+      "id": "a7150657-9c48-435d-b4e3-2e99f5dcc32a",
+      "name": "🔗 Combiner pour Agent LLM"
+    },
+    {
+      "parameters": {
+        "content": "# 🤖 AGENT QUALITÉ + TOOL POSTGRES\n## Nouveauté MCP !\nL'agent peut interroger PostgreSQL directement\npour des calculs supplémentaires.\n\n## Config Tool PostgreSQL\n- Type : Execute Query\n- Credential : `Postgres account`\n- L'agent génère le SQL automatiquement\n\n## Prompt\nL'agent reçoit stats BigQuery + échantillon\net peut faire des requêtes PostgreSQL si besoin",
+        "height": 300,
+        "width": 600,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        16560,
+        13344
+      ],
+      "typeVersion": 1,
+      "id": "19e56033-f935-4d91-beac-23003bc49833",
+      "name": "📋 Note Agent Qualité + Tool"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu es l'agent de qualité des données Flowrecom pour Sofrecom Tunisie.\n\nSTATISTIQUES BIGQUERY AVANT CLEANING :\n{{ JSON.stringify($json.stats_before) }}\n\nANOMALIES DÉTECTÉES :\n{{ JSON.stringify($json.anomalies).substring(0, 2000) }}\n\nÉCHANTILLON DONNÉES :\n{{ JSON.stringify($json.sample).substring(0, 2000) }}\n\nTu peux utiliser le tool PostgreSQL pour faire des requêtes supplémentaires sur etl_tracabilite si nécessaire.\n\nGénère un rapport qualité en JSON :\n{\n  \"quality_score\": <0-100>,\n  \"anomalies_found\": [\"description\"],\n  \"transformations_applied\": [\"transformation\"],\n  \"recommendations\": [\"recommandation\"],\n  \"summary\": \"Résumé 3-4 phrases\"\n}",
+        "options": {
+          "systemMessage": "Tu es expert qualité données BigQuery. Réponds UNIQUEMENT en JSON valide. Utilise le tool PostgreSQL si tu as besoin d'infos supplémentaires sur les sessions."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        16864,
+        13744
+      ],
+      "id": "c74a54f7-d142-4e8d-9ee9-9493d1f33416",
+      "name": "🤖 Agent Qualité LLM"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        16864,
+        13936
+      ],
+      "id": "72e50aed-1b2b-4ef4-8f5d-e1dc291181f2",
+      "name": "Groq Cleaning Model",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT session_id, agent, step, status, created_at FROM etl_tracabilite WHERE session_id = $1 ORDER BY created_at DESC LIMIT 10",
+        "options": {
+          "queryReplacement": [
+            "={{ $('🔧 Préparer Cleaning').first().json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.6,
+      "position": [
+        17056,
+        13936
+      ],
+      "id": "93cad427-8c47-437d-bb57-d8d12f6846e8",
+      "name": "🔧 Tool PostgreSQL — Traçabilité",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nlet llmResult;\ntry { llmResult = JSON.parse(raw.replace(/```json|```/g,'').trim()); } catch(e) { llmResult = { quality_score: 75, anomalies_found: [], transformations_applied: [], recommendations: [], summary: raw }; }\nconst sessionId = $('🔧 Préparer Cleaning').item.json.sessionId;\nconst cleaningLog = { quality_score: llmResult.quality_score || 0, anomalies_found: llmResult.anomalies_found || [], transformations_applied: llmResult.transformations_applied || [], recommendations: llmResult.recommendations || [], storage: 'BigQuery', cleaned_at: new Date().toISOString() };\nreturn [{ json: {\n  text: `🧹 Cleaning BigQuery terminé !\\n\\n📊 Score qualité : ${cleaningLog.quality_score}/100\\n🔍 ${cleaningLog.anomalies_found.length} anomalie(s)\\n💡 ${cleaningLog.recommendations.length} recommandation(s)\\n\\n${llmResult.summary || ''}`,\n  cleaning_log: cleaningLog, quality_score: cleaningLog.quality_score, summary: llmResult.summary,\n  type: 'cleaning', sessionId\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17472,
+        13744
+      ],
+      "id": "2bc2d059-b187-4b97-8971-9b12b7193b2e",
+      "name": "📨 Réponse Cleaning"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'cleaning', 'cleaning_bigquery', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify($json.cleaning_log) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        17872,
+        13744
+      ],
+      "id": "e763931d-f366-4382-ae51-69ba2483f54a",
+      "name": "💾 Trace Cleaning → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# 🤖 AGENT ANALYSE — TOOL BIGQUERY\n## Nouveauté MCP !\nL'agent interroge BigQuery directement\nvia le tool — SQL généré automatiquement !\n\n## Exemples de questions supportées\n- 'Quelle est la somme des budgets ?'\n→ Agent génère : SELECT SUM(...)\n\n- 'Quels canaux ont le plus de conversions ?'\n→ Agent génère : SELECT Canal, SUM(Conversions)...\n\n## Config\n- Tool BigQuery Execute Query natif\n- Groq LLM\n- Mémoire session",
+        "height": 320,
+        "width": 640,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        14144
+      ],
+      "typeVersion": 1,
+      "id": "29d525d6-9a1f-4ac3-8f16-ac3976f97e3d",
+      "name": "📋 Note Agent Analyse + BigQuery Tool"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "sqlQuery": "SELECT sheet_name, row_data FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` WHERE session_id = (SELECT session_id FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` ORDER BY created_at DESC LIMIT 1) AND is_cleaned = true ORDER BY sheet_name, row_index LIMIT 100",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        14544
+      ],
+      "id": "e07f30f3-c197-4e1e-bdab-7f9e2d863a92",
+      "name": "extraire question",
+      "credentials": {
+        "googleApi": {
+          "id": "JZ5hckDRTKCHrLo2",
+          "name": "Google BigQuery account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu es l'agent d'analyse ETL Flowrecom de Sofrecom Tunisie.\n\nTu as accès à un Tool BigQuery pour interroger les données Excel.\nLes données sont dans : `n8nintegration-462721.flowrecom_dataset.excel_raw_data`\nLa colonne `row_data` contient les données JSON de chaque ligne.\n\nSession actuelle : {{ $('session id').first().json.sessionId }}\n\nQUESTION UTILISATEUR : {{ $('session id').first().json.chatInput }}\n\nUtilise le Tool BigQuery pour répondre avec les vraies données.\nRéponds en JSON : {\"response\":\"<réponse détaillée>\",\"query_used\":\"<SQL utilisé>\",\"insights\":\"<insights clés>\"}",
+        "options": {
+          "systemMessage": "Tu es expert en analyse de données BigQuery. Utilise TOUJOURS le tool BigQuery pour obtenir les vraies données. Ne jamais inventer des chiffres."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        16464,
+        14544
+      ],
+      "id": "9fd04eca-67d8-454b-9b85-0c72e9431fe3",
+      "name": "agent d'extraction de donnés",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        16464,
+        14752
+      ],
+      "id": "0b8965f5-2201-436b-9002-ab737a3eb7ca",
+      "name": "Groq Chat Model5",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('session id').item.json.sessionId }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        16256,
+        14752
+      ],
+      "id": "e1b028fa-e709-49fc-954f-c4b49a2013dc",
+      "name": "Simple Memory3"
+    },
+    {
+      "parameters": {
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "sqlQuery": "SELECT sheet_name, row_data FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` WHERE session_id = '{{ $('session id').first().json.sessionId }}' AND is_cleaned = true LIMIT 100",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQueryTool",
+      "typeVersion": 2,
+      "position": [
+        16656,
+        14752
+      ],
+      "id": "f234e4e7-3878-4564-aa53-e22b45726ed2",
+      "name": "🔧 Tool BigQuery — Analyse"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nlet result;\ntry { result = JSON.parse(raw.replace(/```json|```/g,'').trim()); } catch(e) { result = { response: raw }; }\nreturn [{ json: { text: result.response || raw, query_used: result.query_used || '', type: 'question', sessionId: items[0].json.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17072,
+        14544
+      ],
+      "id": "3cf015e9-fdaa-4b4e-9f26-6f4122209b6d",
+      "name": "parser5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'analyse', 'question_answered', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({question: $('session id').first().json.chatInput, answered: true, storage: 'BigQuery'}) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        17472,
+        14544
+      ],
+      "id": "570db064-4415-4e03-8615-394d54ed782e",
+      "name": "💾 Trace Analyse → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# 📈 VISUALISATION — AGENT + BIGQUERY TOOL\n## L'agent génère des requêtes d'agrégation\nAu lieu de requêtes statiques, l'agent\ninterroge BigQuery dynamiquement !\n## Config\n- Tool BigQuery pour agrégats\n- Groq pour génération charts config",
+        "height": 240,
+        "width": 580,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        15344
+      ],
+      "typeVersion": 1,
+      "id": "2b5c05ee-3030-4105-addd-9dcd9937002e",
+      "name": "📋 Note Visualisation BigQuery"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "projectId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "=n8nintegration-462721"
+        },
+        "sqlQuery": "SELECT sheet_name, JSON_VALUE(row_data, '$.Canal') as category, COUNT(*) as count, AVG(SAFE_CAST(JSON_VALUE(row_data, '$.Budget____') AS FLOAT64)) as avg_budget FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` WHERE session_id = (SELECT session_id FROM `n8nintegration-462721.flowrecom_dataset.excel_raw_data` ORDER BY created_at DESC LIMIT 1) AND is_cleaned = true GROUP BY sheet_name, category LIMIT 50",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleBigQuery",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        15744
+      ],
+      "id": "512bcdb9-227b-4181-bf42-cf36f6149437",
+      "name": "📊 Récupérer données pour visualisation",
+      "credentials": {
+        "googleApi": {
+          "id": "JZ5hckDRTKCHrLo2",
+          "name": "Google BigQuery account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu es l'agent de visualisation Flowrecom.\nDonnées agrégées BigQuery : {{ JSON.stringify(items.map(i=>i.json)).substring(0, 2000) }}\nDemande : {{ $('session id').item.json.chatInput }}\n\nRetourne UNIQUEMENT ce JSON :\n{\n  \"charts\": [\n    { \"type\": \"bar|line|pie\", \"title\": \"Titre\", \"data\": { \"labels\": [...], \"values\": [...] }, \"insight\": \"Insight\" }\n  ],\n  \"summary\": \"Résumé\",\n  \"key_metrics\": { \"total_rows\": 0 }\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        15360,
+        15744
+      ],
+      "id": "808300a2-feea-4563-9ecf-3348406f0d5f",
+      "name": "📊 Agent Visualisation"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        15360,
+        15952
+      ],
+      "id": "435938cf-8622-4c39-863a-ceb1c9d0c3e8",
+      "name": "Groq Chat Model3",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nlet chartsConfig;\ntry { chartsConfig = JSON.parse(raw.replace(/```json|```/g,'').trim()); } catch(e) { chartsConfig = { charts: [], summary: 'Données analysées.', key_metrics: {} }; }\nreturn [{ json: { charts: chartsConfig.charts || [], summary: chartsConfig.summary || '', key_metrics: chartsConfig.key_metrics || {}, type: 'visualisation', sessionId: items[0].json.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        15744
+      ],
+      "id": "7b5bbe20-26b9-4bdf-bec0-6859719197c5",
+      "name": "parser visu"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'visualisation', 'charts_generated', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({charts_count: $json.charts.length}) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        16464,
+        15744
+      ],
+      "id": "0c36fb96-8d51-4428-8dc7-a12a30edd9f4",
+      "name": "💾 Trace Visualisation → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Demande de partage : {{ $json.chatInput }}\nDétermine le canal : email, whatsapp, linkedin, teams, slack.\nRetourne JSON : {\"channel\":\"<canal>\",\"message\":\"<message>\",\"subject\":\"<sujet si email>\"}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        15360,
+        16544
+      ],
+      "id": "424caa75-b850-45e2-86b7-5e446dd269af",
+      "name": "🔀 Router Sharing"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        15232,
+        16752
+      ],
+      "id": "cc449497-257c-492a-96c7-150814ad471b",
+      "name": "Groq Chat Model2",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nlet result;\ntry { result = JSON.parse(raw.replace(/```json|```/g,'').trim()); } catch(e) { result = { channel: 'email', message: 'Résultats ETL Flowrecom', subject: 'Rapport ETL' }; }\nreturn [{ json: { ...result, sessionId: items[0].json.sessionId, type: 'sharing', text: `✅ Partage préparé pour ${result.channel}` } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        16544
+      ],
+      "id": "0c1d7aeb-ecb6-4cd1-887c-d8b3d6de4a97",
+      "name": "parser sharing"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'sharing', 'share_prepared', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({channel: $json.channel}) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        16464,
+        16544
+      ],
+      "id": "d684f607-b60f-41d1-b360-e5ba1ad631df",
+      "name": "💾 Trace Sharing → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = items[0].json;\nconst response = {\n  text: item.text || item.response || 'Traitement terminé.',\n  type: item.type || 'general',\n  sessionId: item.sessionId,\n  charts: item.charts || null,\n  cleaning_log: item.cleaning_log || null,\n  quality_score: item.quality_score || null,\n  key_metrics: item.key_metrics || null,\n  summary: item.summary || null,\n  timestamp: new Date().toISOString()\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18368,
+        10640
+      ],
+      "id": "830c378e-6ace-4713-a1ce-89634f6a6e01",
+      "name": "🔀 Agréger réponse finale"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        18768,
+        10640
+      ],
+      "id": "941ba018-be14-4a75-9118-076d49beaa5f",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "content": "# 🧠 EMBEDDINGS — Gemini text-embedding-004\n## Flux\n1. Après BigQuery Insert → générer embedding par ligne\n2. Modèle : `models/text-embedding-004` (Gemini)\n3. Dimensions : 768\n4. Stocker dans `excel_embeddings` (PostgreSQL + pgvector)\n5. L'agent d'analyse utilise le Vector Store Tool\n   pour recherche sémantique\n\n## SQL à exécuter dans PostgreSQL\n```sql\nCREATE EXTENSION IF NOT EXISTS vector;\nCREATE TABLE excel_embeddings (\n  id SERIAL PRIMARY KEY,\n  session_id VARCHAR(255),\n  sheet_name VARCHAR(255),\n  row_index INTEGER,\n  row_data TEXT,\n  embedding vector(768),\n  created_at TIMESTAMP DEFAULT NOW()\n);\nCREATE INDEX ON excel_embeddings\n  USING hnsw (embedding vector_cosine_ops);\n```\n## Config\n- Model : `models/text-embedding-004`\n- Dimensions : 768\n- Credential : `Google Gemini(PaLM) Api account 6`",
+        "height": 480,
+        "width": 700,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        17664,
+        11648
+      ],
+      "typeVersion": 1,
+      "id": "e88fc19a-1742-48b0-a6e3-1cf01ef95a1a",
+      "name": "📋 Note Embeddings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Préparer le texte à embedder pour chaque ligne\n// On combine sheet_name + row_data pour un contexte riche\nconst rows = $input.all();\nreturn rows.map(item => ({\n  json: {\n    session_id: item.json.session_id,\n    sheet_name: item.json.sheet_name,\n    row_index: item.json.row_index,\n    row_data: item.json.row_data,\n    text_to_embed: `Feuille: ${item.json.sheet_name}. Données: ${item.json.row_data}`\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18368,
+        12336
+      ],
+      "id": "16108aa4-629f-4aea-adad-f11f49ee8ade",
+      "name": "🔤 Préparer texte pour embedding"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        18768,
+        12336
+      ],
+      "id": "52b2e774-7874-4922-ac3f-ae63196dff8f",
+      "name": "🧠 Gemini Embeddings",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ia5fm8Yvn0e17UBq",
+          "name": "Google Gemini(PaLM) Api account 6"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combiner les données avec les vecteurs générés\nconst rows = $input.all();\nreturn rows.map((item, idx) => ({\n  json: {\n    session_id: item.json.session_id,\n    sheet_name: item.json.sheet_name,\n    row_index: item.json.row_index,\n    row_data: item.json.row_data,\n    embedding: JSON.stringify(item.json.embedding || [])\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19168,
+        12336
+      ],
+      "id": "4f819bf7-b1bb-42be-aeeb-61d655f89482",
+      "name": "🔗 Combiner données + vecteurs"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO excel_embeddings (session_id, sheet_name, row_index, row_data, embedding, created_at)\nVALUES ($1, $2, $3, $4, $5::vector, NOW())\nON CONFLICT DO NOTHING;",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.session_id }}",
+            "={{ $json.sheet_name }}",
+            "={{ $json.row_index }}",
+            "={{ $json.row_data }}",
+            "={{ $json.embedding }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        19568,
+        12336
+      ],
+      "id": "d374d80e-ea3a-4e47-8049-4ee9c429a82d",
+      "name": "💾 INSERT Embeddings PostgreSQL",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'embeddings', 'embeddings_stored', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $('session id').first().json.sessionId }}",
+            "={{ JSON.stringify({rows_embedded: $input.all().length, model: 'gemini-text-embedding-004'}) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        19968,
+        12336
+      ],
+      "id": "99a25fcc-c9c5-468b-9b01-612ace63271e",
+      "name": "💾 Trace Embeddings → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT e.row_data, e.sheet_name, e.row_index,\n  1 - (e.embedding <=> (\n    SELECT embedding FROM excel_embeddings\n    WHERE session_id = $1\n    ORDER BY created_at DESC\n    LIMIT 1\n  )) AS similarity\nFROM excel_embeddings e\nWHERE e.session_id = $1\nORDER BY e.embedding <=> (\n  SELECT embedding FROM excel_embeddings\n  WHERE session_id = $1\n  ORDER BY created_at DESC LIMIT 1\n)\nLIMIT 10;",
+        "options": {
+          "queryReplacement": [
+            "={{ $('session id').first().json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.6,
+      "position": [
+        16864,
+        14752
+      ],
+      "id": "38382508-57ed-4e40-8064-3ad64e463eea",
+      "name": "🔍 Tool Vector Store — Recherche Sémantique",
+      "credentials": {
+        "postgres": {
+          "id": "veA1a9JCMWm1UY9O",
+          "name": "supa"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "session id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "session id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "session id": {
+      "main": [
+        [
+          {
+            "node": "agent parent Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agent parent Router": {
+      "main": [
+        [
+          {
+            "node": "text->json",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agent parent Router",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "text->json": {
+      "main": [
+        [
+          {
+            "node": "analyse,choix,ETL,conversation ?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "💾 Trace Orchestrateur → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "analyse,choix,ETL,conversation ?": {
+      "main": [
+        [
+          {
+            "node": "Search files and folders",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "agent de conversation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "extraire nom de fichier",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "extraire question",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📊 Récupérer données pour visualisation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🔀 Router Sharing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🔧 Préparer Cleaning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agent de conversation": {
+      "main": [
+        [
+          {
+            "node": "parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agent de conversation",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "agent de conversation",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parser": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search files and folders": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extraire nom de fichier": {
+      "main": [
+        [
+          {
+            "node": "extraire seulemnt le fichier excel choisi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extraire seulemnt le fichier excel choisi": {
+      "main": [
+        [
+          {
+            "node": "telelcharger le fichier a partir son id1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "telelcharger le fichier a partir son id1": {
+      "main": [
+        [
+          {
+            "node": "convert to google sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "convert to google sheet1": {
+      "main": [
+        [
+          {
+            "node": "extraire spreadsheet id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extraire spreadsheet id": {
+      "main": [
+        [
+          {
+            "node": "extract sheet ids1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extract sheet ids1": {
+      "main": [
+        [
+          {
+            "node": "retourne noms de sheets1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "retourne noms de sheets1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [
+          {
+            "node": "✅ Fin Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "🔧 Préparer lignes pour BigQuery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Préparer lignes pour BigQuery": {
+      "main": [
+        [
+          {
+            "node": "🚀 BigQuery Insert Natif",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔤 Préparer texte pour embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🚀 BigQuery Insert Natif": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ Fin Extraction": {
+      "main": [
+        [
+          {
+            "node": "📊 BigQuery Stats Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 BigQuery Stats Extraction": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Extraction → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Extraction → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Préparer Cleaning": {
+      "main": [
+        [
+          {
+            "node": "📊 BigQuery Stats avant cleaning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 BigQuery Stats avant cleaning": {
+      "main": [
+        [
+          {
+            "node": "🔍 BigQuery Détecter Anomalies",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📋 BigQuery Échantillon LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 BigQuery Détecter Anomalies": {
+      "main": [
+        [
+          {
+            "node": "✅ BigQuery Marquer Cleaned",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 BigQuery Échantillon LLM": {
+      "main": [
+        [
+          {
+            "node": "✅ BigQuery Marquer Cleaned",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ BigQuery Marquer Cleaned": {
+      "main": [
+        [
+          {
+            "node": "🔗 Combiner pour Agent LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Combiner pour Agent LLM": {
+      "main": [
+        [
+          {
+            "node": "🤖 Agent Qualité LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agent Qualité LLM": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse Cleaning",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Cleaning Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 Agent Qualité LLM",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Tool PostgreSQL — Traçabilité": {
+      "ai_tool": [
+        [
+          {
+            "node": "🤖 Agent Qualité LLM",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse Cleaning": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Cleaning → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Cleaning → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extraire question": {
+      "main": [
+        [
+          {
+            "node": "agent d'extraction de donnés",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agent d'extraction de donnés": {
+      "main": [
+        [
+          {
+            "node": "parser5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agent d'extraction de donnés",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory3": {
+      "ai_memory": [
+        [
+          {
+            "node": "agent d'extraction de donnés",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔧 Tool BigQuery — Analyse": {
+      "ai_tool": [
+        [
+          {
+            "node": "agent d'extraction de donnés",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parser5": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Analyse → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Analyse → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Récupérer données pour visualisation": {
+      "main": [
+        [
+          {
+            "node": "📊 Agent Visualisation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Agent Visualisation": {
+      "main": [
+        [
+          {
+            "node": "parser visu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "📊 Agent Visualisation",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parser visu": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Visualisation → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Visualisation → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Router Sharing": {
+      "main": [
+        [
+          {
+            "node": "parser sharing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🔀 Router Sharing",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parser sharing": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Sharing → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Sharing → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Agréger réponse finale": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔤 Préparer texte pour embedding": {
+      "main": [
+        [
+          {
+            "node": "🔗 Combiner données + vecteurs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Combiner données + vecteurs": {
+      "main": [
+        [
+          {
+            "node": "💾 INSERT Embeddings PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 INSERT Embeddings PostgreSQL": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Embeddings → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Tool Vector Store — Recherche Sémantique": {
+      "ai_tool": [
+        [
+          {
+            "node": "agent d'extraction de donnés",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "376e7f43-8b39-4977-ae79-b81c752b7209",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6ef1e333ac5194da2f53aa69dd299897b89fd4c6b90f3e04e71baf3f17755f4f"
+  },
+  "id": "onBK10jBN7zVNZQl",
+  "tags": []
+}

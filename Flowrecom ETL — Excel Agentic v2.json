@@ -1,0 +1,3818 @@
+{
+  "name": "Flowrecom ETL — Agent Excel (copie de travail Drive)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# 🤖 FLOWRECOM — Agent ETL Excel agentique\n\n## Architecture\n- ✅ Fichiers bruts dans Drive `Flowrecom` (id 11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy)\n- ✅ Copie de travail auto dans `Flowrecom/Working` → convertie en Google Sheet\n- ✅ Transformations réelles via Google Sheets API (upper/lower, dates, doublons, colonnes calculées, formats, TCD natif)\n- ✅ Questions/statistiques calculées de façon déterministe (pas d'invention de chiffres par le LLM)\n- ✅ Consultation à tout moment via le lien Google Sheet\n- ✅ Chargement final multi-destination : Local + Drive `Final` + SharePoint\n- ✅ Postgres : `etl_sessions` (état courant) + `etl_tracabilite` (historique)\n\n## Credentials à configurer\n- `Groq account` → Groq API Key\n- `Google Drive account` → Drive OAuth2\n- `Google Sheets account 2` → Sheets OAuth2\n- `Google account` → OAuth2 générique (copie de fichiers Drive)\n- `Postgres account (supa)` → PostgreSQL/Supabase\n- `SharePoint account` (à créer par vous, voir note Chargement)\n\n## Paramètres à remplacer avant utilisation\n- `<WORKING_FOLDER_ID>` : id du sous-dossier Drive `Flowrecom/Working`\n- `<FINAL_FOLDER_ID>` : id du sous-dossier Drive `Flowrecom/Final`\n- `<SHAREPOINT_SITE_ID>` : id du site SharePoint cible\n- Chemin local de sortie : `C:\\Users\\Hanen GB\\Desktop\\n8n ETL\\output\\` (à créer sur le disque)\n\n## SQL à exécuter\nVoir `etl_sessions.sql` fourni à côté de ce workflow.",
+        "height": 620,
+        "width": 1000,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        11456,
+        9136
+      ],
+      "typeVersion": 1,
+      "id": "ecd2779e-064d-48c8-843e-82baa1dfd406",
+      "name": "📋 Architecture Agentique Excel"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        11888,
+        10528
+      ],
+      "id": "9dc0a67f-730a-48ad-a0b3-8c082f2620ba",
+      "name": "When chat message received",
+      "webhookId": "b06a6145-3f08-495a-aaa4-55849eccaa09"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "flowrecom-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        11888,
+        10736
+      ],
+      "id": "902f5cd9-4d9b-423d-bc62-b54ae87459ba",
+      "name": "Webhook",
+      "webhookId": "flowrecom-webhook-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst sessionId = body.sessionId || 'session_' + Date.now();\nconst chatInput = body.chatInput || body.message || '';\nconst uploadedFile = body.uploadedFile || null;\nreturn [{ json: { sessionId, chatInput, uploadedFile, timestamp: new Date().toISOString() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12368,
+        10640
+      ],
+      "id": "46939b49-c6d6-42d0-bc51-52c3c768f4db",
+      "name": "session id"
+    },
+    {
+      "parameters": {
+        "content": "# 🧭 ORCHESTRATEUR\n## Fonction\nClassifie l'intention utilisateur\net route vers le bon sous-flux.\n## Intentions\nselect_file, transform, question,\nvisualisation, consult, loading,\nsharing, conversation\n## Config\n- ✅ Groq (rapide + gratuit)\n- ✅ Trace dans PostgreSQL",
+        "height": 240,
+        "width": 500,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        12560,
+        10272
+      ],
+      "typeVersion": 1,
+      "id": "ab74c73e-b572-4749-b1d9-e6f420fd8d18",
+      "name": "📋 Note Orchestrateur"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Réponds uniquement avec ce JSON, rien d'autre :\n{\"chatInput\":\"{{ $json.chatInput }}\",\"intention\":\"INTENTION\",\"sessionId\":\"{{ $json.sessionId }}\"}\n\nRemplace INTENTION :\n- select_file → veut voir la liste des fichiers ou choisir/ouvrir un fichier précis à traiter\n- transform → demande de nettoyage, mise en forme, upper/lower case, dates, doublons, colonne calculée, TCD/pivot, ou toute transformation sur le fichier déjà sélectionné\n- question → demande un calcul, un comptage, une statistique sur les données chargées\n- visualisation → demande un graphe/chart\n- consult → veut voir/vérifier l'état actuel de la copie de travail (lien, aperçu)\n- sharing → veut partager/envoyer le résultat\n- loading → veut sauvegarder/exporter le fichier final (local, drive, sharepoint)\n- conversation → tout le reste\n\nMessage : {{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "Tu es un classificateur. Réponds UNIQUEMENT avec un JSON valide."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        12864,
+        10640
+      ],
+      "id": "e5bc5381-8b93-4107-b3c6-4cc7f79f4d44",
+      "name": "agent parent Router"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        12960,
+        10912
+      ],
+      "id": "dda7628e-e4a1-41e7-b0f0-11a3eba6c32e",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nconst cleaned = raw.replace(/```json\\s*/g,'').replace(/\\s*```/g,'').trim();\ntry { return [{ json: JSON.parse(cleaned) }]; } catch(e) { return [{ json: { intention: 'conversation', chatInput: items[0].json.chatInput || '', sessionId: items[0].json.sessionId || '' } }]; }"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13360,
+        10640
+      ],
+      "id": "ebfb08eb-2463-45b9-a367-be1ac25af7b3",
+      "name": "text->json"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, intention, input_data, status, created_at) VALUES ($1, 'orchestrateur', 'router_dispatch', $2, $3, 'OK', NOW()) ON CONFLICT DO NOTHING;",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ $json.intention }}",
+            "={{ $json.chatInput }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        13664,
+        10576
+      ],
+      "id": "f5500f5c-48a1-44e7-a46c-39bac988ea5a",
+      "name": "💾 Trace Orchestrateur → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "select_file",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "select_file"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "conversation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "conversation"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "transform",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "transform"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "question",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "question"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "visualisation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "visualisation"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "sharing",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "sharing"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "loading",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "loading"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"intention\"]}}",
+                    "rightValue": "consult",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "consult"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        14064,
+        10640
+      ],
+      "id": "29903251-5f41-4cec-b4d0-58760630fda9",
+      "name": "select_file,transform,question,visu,sharing,loading,consult,conversation ?"
+    },
+    {
+      "parameters": {
+        "content": "# 💬 CONVERSATION\n## Fonction\nAgent conversationnel Flowrecom.\nSalutations, questions générales.\n## Config\n- ✅ Groq\n- ✅ Mémoire session",
+        "height": 200,
+        "width": 450,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        9248
+      ],
+      "typeVersion": 1,
+      "id": "d5537b04-9970-4cff-892c-8e176a901f16",
+      "name": "📋 Note Conversation"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu es Flowrecom 🤖, agent conversationnel Sofrecom Tunisie 🇹🇳.\nMessage : {{ $json.chatInput }}\nRéponds en JSON : {\"response\":\"<réponse ≤500 chars avec emojis>\"}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        9536
+      ],
+      "id": "7504628d-d374-473c-b61a-6db3593c25be",
+      "name": "agent de conversation"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        14736,
+        9744
+      ],
+      "id": "59a07c71-608b-49b2-a9de-4c400c547c84",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.sessionId }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        15056,
+        9744
+      ],
+      "id": "f09cb14c-7b8c-41db-a00e-82e11bba385b",
+      "name": "Simple Memory1"
+    },
+    {
+      "parameters": {
+        "jsCode": "let out = 'Désolé, je n\\'ai pas compris.'; const o = items[0].json.output; if(o){ try { const p = JSON.parse(o.replace(/```json|```/g,'').trim()); out = p.response || o; } catch(e){ out = o; } } return [{ json: { text: out, type: 'conversation', sessionId: items[0].json.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15568,
+        9536
+      ],
+      "id": "eefe21f1-cec3-4b43-8c0a-b7712c093906",
+      "name": "parser"
+    },
+    {
+      "parameters": {
+        "content": "# 📁 SÉLECTION FICHIER (source brute)\n## Fonction\nListe les fichiers Excel dans Google Drive\ndossier Flowrecom et demande le choix à l'utilisateur.\nDès que l'utilisateur tape un nom, une copie\nde travail est créée dans Flowrecom/Working\net convertie en Google Sheet.\n## Config\n- ✅ Google Drive OAuth2\n- Dossier source : 11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy\n- Dossier working : <WORKING_FOLDER_ID>",
+        "height": 260,
+        "width": 520,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        10240
+      ],
+      "typeVersion": 1,
+      "id": "2c753f5c-2625-4a98-8099-5c2c642341dd",
+      "name": "📋 Note Sélection"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "='11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy' in parents and trashed=false",
+        "filter": {
+          "driveId": {
+            "mode": "list",
+            "value": "My Drive"
+          },
+          "folderId": {
+            "__rl": true,
+            "value": "11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy",
+            "mode": "list",
+            "cachedResultName": "Flowrecom"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        14864,
+        10448
+      ],
+      "id": "c08dd9eb-ca0d-4846-9407-076f031b0cec",
+      "name": "Search files and folders",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YbmaHFZdRHuKkPFU",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = [];\nfor (const item of $input.all()) {\n  if (item.json.name && item.json.id) files.push({ name: item.json.name, id: item.json.id });\n}\nconst excelFiles = files.filter(f => f.name.endsWith('.xlsx') || f.name.endsWith('.xls') || f.name.endsWith('.csv'));\nconst fileList = excelFiles.map((f, i) => `${i+1}. 📄 ${f.name}`).join('\\n');\nconst sessionId = $('select_file,transform,question,visu,sharing,loading,consult,conversation ?').first().json.sessionId;\nreturn [{ json: { text: `📂 Fichiers disponibles :\\n\\n${fileList}\\n\\nTapez le nom exact du fichier à traiter.`, files: excelFiles, type: 'select_file', sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14992,
+        10544
+      ],
+      "id": "14f64884-6245-4b3e-9ee7-3e800c10fb0f",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatInput = items[0].json.chatInput || '';\nconst hasFileName = /\\.(xlsx|xls|csv)\\b/i.test(chatInput) ? 'yes' : 'no';\nreturn [{ json: { ...items[0].json, hasFileName } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        11200
+      ],
+      "id": "sf-detect-filename",
+      "name": "🔎 Détecter nom de fichier"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasFileName }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        15264,
+        11200
+      ],
+      "id": "sf-if-filename",
+      "name": "A un nom de fichier ?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fileName = items[0].json.chatInput.trim();\nreturn [{ json: { fileName, intention: items[0].json.intention, sessionId: items[0].json.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        12048
+      ],
+      "id": "4e6c3c2e-3fd9-475c-9c23-a2a47465bf7f",
+      "name": "extraire nom de fichier"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "='11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy' in parents and name = '{{ $json.fileName }}' and trashed=false",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy",
+            "mode": "list",
+            "cachedResultName": "Flowrecom"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        15264,
+        12048
+      ],
+      "id": "dc48568f-ff69-467d-a122-1c4da32513bc",
+      "name": "extraire seulemnt le fichier excel choisi",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YbmaHFZdRHuKkPFU",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.id }}/copy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: 'WORKING_' + $json.name + '_' + $('session id').first().json.sessionId, convert: true, mimeType: 'application/vnd.google-apps.spreadsheet', parents: ['<WORKING_FOLDER_ID>'] }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        15664,
+        12048
+      ],
+      "id": "sf-copy-working",
+      "name": "🗂️ Copier vers Working",
+      "credentials": {
+        "googleOAuth2Api": {
+          "id": "xTc2HT89j5dzk5hs",
+          "name": "Google account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const spreadsheetId = items[0].json.id;\nif (!spreadsheetId) throw new Error('Copie/Conversion échouée');\nreturn [{ json: { spreadsheetId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        12048
+      ],
+      "id": "e0483794-a148-4691-ae94-c316917e085c",
+      "name": "extraire spreadsheet id"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}?fields=sheets.properties",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16464,
+        12048
+      ],
+      "id": "f4d7768b-2d32-4ec5-9f5e-8fe09ec9df35",
+      "name": "extract sheet ids1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sheets = items[0].json.sheets || [];\nif (sheets.length === 0) throw new Error('Aucune feuille trouvée');\nconst spreadsheetId = $('extraire spreadsheet id').first().json.spreadsheetId;\nreturn sheets.map(s => ({\n  json: { spreadsheetId, sheetName: s.properties.title, sheetId: s.properties.sheetId, totalRows: s.properties.gridProperties.rowCount || 1000 }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16864,
+        12048
+      ],
+      "id": "eafcd8db-399c-4488-8943-2b82bcf234d3",
+      "name": "retourne noms de sheets1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sheets = $input.all();\nconst spreadsheetId = sheets[0]?.json.spreadsheetId;\nconst fileName = $('extraire nom de fichier').first().json.fileName;\nconst sessionId = $('session id').first().json.sessionId;\nconst sheetsList = sheets.map(s => `- ${s.json.sheetName} (jusqu'à ${s.json.totalRows} lignes)`).join('\\n');\nreturn [{ json: {\n  sessionId, fileName, spreadsheetId,\n  driveWorkingFileId: spreadsheetId,\n  driveSourceFileId: $('extraire seulemnt le fichier excel choisi').first().json.id,\n  sheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,\n  text: `📁 Fichier sélectionné : ${fileName}\\n\\n🗂️ Feuilles détectées :\\n${sheetsList}\\n\\n🔗 Copie de travail : https://docs.google.com/spreadsheets/d/${spreadsheetId}\\n\\nQue voulez-vous faire ? (nettoyer, dates, doublons, colonne calculée, format, TCD...)`,\n  type: 'select_file'\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17264,
+        12048
+      ],
+      "id": "sf-summarize",
+      "name": "📋 Résumer sélection"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_sessions (session_id, file_name, drive_source_file_id, drive_working_file_id, spreadsheet_id, status, updated_at)\nVALUES ($1, $2, $3, $4, $5, 'ready', NOW())\nON CONFLICT (session_id) DO UPDATE SET\n  file_name = EXCLUDED.file_name,\n  drive_source_file_id = EXCLUDED.drive_source_file_id,\n  drive_working_file_id = EXCLUDED.drive_working_file_id,\n  spreadsheet_id = EXCLUDED.spreadsheet_id,\n  status = 'ready',\n  updated_at = NOW();",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ $json.fileName }}",
+            "={{ $json.driveSourceFileId }}",
+            "={{ $json.driveWorkingFileId }}",
+            "={{ $json.spreadsheetId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        17664,
+        12048
+      ],
+      "id": "sf-upsert-session",
+      "name": "💾 Upsert Session",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "# 🧹🔧 TRANSFORM — Boîte à outils Google Sheets\n## Fonctionnement\n1. Vérifie qu'un fichier est sélectionné (etl_sessions)\n2. Agent parseur transforme la demande NL en JSON structuré\n   {action, sheetName, columns, case, targetColumn, formula (avec {row}),\n    numberFormat, pivotRows, pivotValues, pivotAggregation}\n3. Switch route vers l'action déterministe correspondante :\n   clean_text · parse_dates · dedupe · add_calculated_column ·\n   format_cells · pivot_table (TCD natif Google Sheets)\n4. Chaque action écrit directement dans la copie de travail\n   via l'API Google Sheets, puis renvoie le lien de vérification.\n\n⚠️ Le TCD (pivot_table) utilise l'objet natif `pivotTable` de l'API\nSheets — à tester une première fois et ajuster si besoin dans n8n.",
+        "height": 420,
+        "width": 760,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14664,
+        12750
+      ],
+      "typeVersion": 1,
+      "id": "tr-sticky",
+      "name": "📋 Note Transformation"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT spreadsheet_id, file_name FROM etl_sessions WHERE session_id = $1",
+        "options": {
+          "queryReplacement": [
+            "={{ $('session id').first().json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        14864,
+        13400
+      ],
+      "id": "tr-read-session",
+      "name": "📥 Lire Session (Transform)",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = items[0]?.json;\nconst sessionId = $('session id').first().json.sessionId;\nconst chatInput = $('session id').first().json.chatInput;\nif (!row || !row.spreadsheet_id) {\n  return [{ json: { sessionStatus: 'missing', sessionId, chatInput, text: \"⚠️ Aucun fichier sélectionné. Dites-moi d'abord quel fichier vous voulez traiter (ex: 'ouvre bi_dimensions.xlsx').\" } }];\n}\nreturn [{ json: { sessionStatus: 'ready', spreadsheetId: row.spreadsheet_id, fileName: row.file_name, sessionId, chatInput } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15264,
+        13400
+      ],
+      "id": "tr-check-session",
+      "name": "🔎 Vérifier session (Transform)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.sessionStatus }}",
+              "rightValue": "missing",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        15664,
+        13400
+      ],
+      "id": "tr-if-session",
+      "name": "A un fichier ? (Transform)"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { text: items[0].json.text, sessionId: items[0].json.sessionId, type: 'transform' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        13600
+      ],
+      "id": "tr-no-session-response",
+      "name": "⚠️ Réponse Sans Fichier (Transform)"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu es l'agent de transformation ETL Flowrecom. Fichier courant : {{ $json.fileName }}.\nDemande utilisateur : {{ $json.chatInput }}\n\nRéponds UNIQUEMENT avec ce JSON (rien d'autre) :\n{\n  \"action\": \"clean_text|parse_dates|dedupe|add_calculated_column|format_cells|pivot_table\",\n  \"sheetName\": \"<nom de la feuille concernée, vide si non précisé>\",\n  \"columns\": [\"<noms de colonnes concernées>\"],\n  \"case\": \"upper|lower|proper\",\n  \"targetColumn\": \"<nom de la nouvelle colonne calculée>\",\n  \"formula\": \"<formule Google Sheets utilisant {row} comme placeholder de numéro de ligne, ex: =B{row}*C{row}>\",\n  \"numberFormat\": \"DATE|CURRENCY|PERCENT|NUMBER|TEXT\",\n  \"pivotRows\": [\"<colonnes pour les lignes du TCD>\"],\n  \"pivotValues\": [\"<colonnes à agréger dans le TCD>\"],\n  \"pivotAggregation\": \"SUM|COUNTA|AVERAGE\"\n}\nLaisse vide (\"\" ou []) les champs non concernés par l'action choisie.",
+        "options": {
+          "systemMessage": "Tu es un extracteur de paramètres. Réponds UNIQUEMENT avec un JSON valide, sans explication."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        13200
+      ],
+      "id": "tr-parse-agent",
+      "name": "🤖 Agent Parseur Transformation"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        16064,
+        13440
+      ],
+      "id": "tr-groq-model",
+      "name": "Groq Chat Model — Transform",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nlet action;\ntry { action = JSON.parse(raw.replace(/```json\\s*/g,'').replace(/```/g,'').trim()); } catch(e) { action = { action: 'clean_text', columns: [], case: 'upper' }; }\nconst ctx = $('🔎 Vérifier session (Transform)').first().json;\nreturn [{ json: { ...action, spreadsheetId: ctx.spreadsheetId, fileName: ctx.fileName, sessionId: ctx.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16464,
+        13300
+      ],
+      "id": "tr-parse-json",
+      "name": "🧩 Parser action transformation"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}?fields=sheets.properties",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16864,
+        13300
+      ],
+      "id": "tr-list-sheets",
+      "name": "📑 Lister feuilles (Transform)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = items[0].json;\nconst action = $('🧩 Parser action transformation').first().json;\nconst sheets = meta.sheets || [];\nconst match = sheets.find(s => s.properties.title === action.sheetName) || sheets[0];\nreturn [{ json: { ...action, sheetName: match.properties.title, sheetGid: match.properties.sheetId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17264,
+        13300
+      ],
+      "id": "tr-resolve-sheet",
+      "name": "🔎 Résoudre feuille cible"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"action\"]}}",
+                    "rightValue": "clean_text",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "clean_text"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"action\"]}}",
+                    "rightValue": "parse_dates",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "parse_dates"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"action\"]}}",
+                    "rightValue": "dedupe",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "dedupe"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"action\"]}}",
+                    "rightValue": "add_calculated_column",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "add_calculated_column"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"action\"]}}",
+                    "rightValue": "format_cells",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "format_cells"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{$json[\"action\"]}}",
+                    "rightValue": "pivot_table",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              },
+              "renameOutput": true,
+              "outputKey": "pivot_table"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        17664,
+        13300
+      ],
+      "id": "tr-switch-action",
+      "name": "🔀 Type de transformation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const a = items[0].json;\nreturn [{ json: { text: `❓ Je n'ai pas reconnu cette transformation. Essayez : mettre en majuscules la colonne X, corriger les dates de la colonne Y, supprimer les doublons, ajouter une colonne calculée, formater en devise, ou créer un TCD.`, sessionId: a.sessionId, type: 'transform' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18064,
+        14700
+      ],
+      "id": "tr-fallback",
+      "name": "❓ Action non reconnue"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.sheetName) }}?majorDimension=ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18064,
+        12900
+      ],
+      "id": "tr-a-read",
+      "name": "📥 Lire valeurs (Clean)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const action = $('🔀 Type de transformation').first().json;\nconst values = items[0].json.values || [];\nconst headers = values[0] || [];\nconst caseFn = { upper: s=>String(s).toUpperCase(), lower: s=>String(s).toLowerCase(), proper: s=>String(s).replace(/\\w\\S*/g, t=>t[0].toUpperCase()+t.slice(1).toLowerCase()) }[action.case] || (s=>String(s).trim());\nconst cols = (action.columns||[]).map(c => String(c).trim().toLowerCase());\nconst targetIdx = headers.map((h,i)=>[String(h).trim().toLowerCase(),i]).filter(([h])=>cols.includes(h)).map(([,i])=>i);\nconst cleaned = values.map((row, r) => r===0 ? row : row.map((cell,i) => targetIdx.includes(i) ? caseFn(String(cell ?? '').trim()) : cell));\nreturn [{ json: { spreadsheetId: action.spreadsheetId, sheetName: action.sheetName, range: `${action.sheetName}!A1`, values: cleaned, columns: action.columns, sessionId: action.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18464,
+        12900
+      ],
+      "id": "tr-a-code",
+      "name": "🧹 Nettoyer texte"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}?valueInputOption=RAW",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: $json.values }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18864,
+        12900
+      ],
+      "id": "tr-a-write",
+      "name": "✏️ Écrire valeurs (Clean)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('🧹 Nettoyer texte').first().json;\nreturn [{ json: { text: `🧹 Colonnes ${JSON.stringify(ctx.columns)} nettoyées.\\n🔗 Vérifier : https://docs.google.com/spreadsheets/d/${ctx.spreadsheetId}`, sessionId: ctx.sessionId, type: 'transform' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19264,
+        12900
+      ],
+      "id": "tr-a-response",
+      "name": "📨 Réponse Clean"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.sheetName) }}?majorDimension=ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18064,
+        13200
+      ],
+      "id": "tr-b-read",
+      "name": "📥 Lire valeurs (Dates)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const action = $('🔀 Type de transformation').first().json;\nconst values = items[0].json.values || [];\nconst headers = values[0] || [];\nconst target = String((action.columns||[])[0]||'').trim().toLowerCase();\nconst colIdx = headers.findIndex(h => String(h).trim().toLowerCase() === target);\nfunction parseAny(v){\n  if(!v) return v;\n  const s = String(v).trim(); let m;\n  if((m = s.match(/^(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{4})$/))) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;\n  if((m = s.match(/^(\\d{4})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{1,2})$/))) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;\n  const d = new Date(s); if(!isNaN(d)) return d.toISOString().slice(0,10);\n  return s;\n}\nconst out = values.map((row,r)=> r===0||colIdx<0 ? row : row.map((c,i)=> i===colIdx ? parseAny(c) : c));\nreturn [{ json: { spreadsheetId: action.spreadsheetId, sheetName: action.sheetName, sheetGid: action.sheetGid, range: `${action.sheetName}!A1`, values: out, colIdx, sessionId: action.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18464,
+        13200
+      ],
+      "id": "tr-b-code",
+      "name": "📅 Normaliser dates"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}?valueInputOption=RAW",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: $json.values }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18864,
+        13200
+      ],
+      "id": "tr-b-write",
+      "name": "✏️ Écrire valeurs (Dates)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('📅 Normaliser dates').first().json;\nconst body = { requests: [{ repeatCell: { range: { sheetId: ctx.sheetGid, startRowIndex: 1, startColumnIndex: ctx.colIdx, endColumnIndex: ctx.colIdx + 1 }, cell: { userEnteredFormat: { numberFormat: { type: 'DATE', pattern: 'yyyy-mm-dd' } } }, fields: 'userEnteredFormat.numberFormat' } }] };\nreturn [{ json: { spreadsheetId: ctx.spreadsheetId, body, sessionId: ctx.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19264,
+        13200
+      ],
+      "id": "tr-b-prepare-format",
+      "name": "🎨 Préparer format Dates"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        19664,
+        13200
+      ],
+      "id": "tr-b-format",
+      "name": "🎨 Appliquer format Dates",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('🎨 Préparer format Dates').first().json;\nreturn [{ json: { text: `📅 Dates normalisées et formatées.\\n🔗 Vérifier : https://docs.google.com/spreadsheets/d/${ctx.spreadsheetId}`, sessionId: ctx.sessionId, type: 'transform' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20064,
+        13200
+      ],
+      "id": "tr-b-response",
+      "name": "📨 Réponse Dates"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.sheetName) }}?majorDimension=ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18064,
+        13500
+      ],
+      "id": "tr-c-read",
+      "name": "📥 Lire valeurs (Dedupe)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const action = $('🔀 Type de transformation').first().json;\nconst values = items[0].json.values || [];\nconst headers = values[0] || [];\nconst rows = values.slice(1);\nconst seen = new Set(); const kept = [];\nfor (const row of rows) { const key = JSON.stringify(row); if (!seen.has(key)) { seen.add(key); kept.push(row); } }\nconst removed = rows.length - kept.length;\nconst padded = kept.concat(Array.from({ length: removed }, () => headers.map(() => '')));\nconst out = [headers, ...padded];\nreturn [{ json: { spreadsheetId: action.spreadsheetId, sheetName: action.sheetName, range: `${action.sheetName}!A1`, values: out, removed, sessionId: action.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18464,
+        13500
+      ],
+      "id": "tr-c-code",
+      "name": "🧹 Supprimer doublons"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}?valueInputOption=RAW",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: $json.values }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18864,
+        13500
+      ],
+      "id": "tr-c-write",
+      "name": "✏️ Écrire valeurs (Dedupe)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('🧹 Supprimer doublons').first().json;\nreturn [{ json: { text: `🧹 ${ctx.removed} doublon(s) supprimé(s).\\n🔗 Vérifier : https://docs.google.com/spreadsheets/d/${ctx.spreadsheetId}`, sessionId: ctx.sessionId, type: 'transform' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19264,
+        13500
+      ],
+      "id": "tr-c-response",
+      "name": "📨 Réponse Dedupe"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.sheetName) }}?majorDimension=ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18064,
+        13800
+      ],
+      "id": "tr-d-read",
+      "name": "📥 Lire valeurs (Calc)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const action = $('🔀 Type de transformation').first().json;\nconst values = items[0].json.values || [];\nconst headers = values[0] || [];\nconst rows = values.length;\nconst nextColIdx = headers.length;\nconst colLetter = String.fromCharCode(65 + nextColIdx);\nconst newHeader = action.targetColumn || 'Calcul';\nconst formulas = [[newHeader]];\nfor (let r = 2; r <= rows; r++) { formulas.push([ String(action.formula||'').replace(/\\{row\\}/g, r) ]); }\nreturn [{ json: { spreadsheetId: action.spreadsheetId, sheetName: action.sheetName, range: `${action.sheetName}!${colLetter}1`, values: formulas, colLetter, newHeader, sessionId: action.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18464,
+        13800
+      ],
+      "id": "tr-d-code",
+      "name": "🧮 Construire colonne calculée"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.range) }}?valueInputOption=USER_ENTERED",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: $json.values }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18864,
+        13800
+      ],
+      "id": "tr-d-write",
+      "name": "✏️ Écrire formule (Calc)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('🧮 Construire colonne calculée').first().json;\nreturn [{ json: { text: `🧮 Colonne calculée « ${ctx.newHeader} » ajoutée (colonne ${ctx.colLetter}).\\n🔗 Vérifier : https://docs.google.com/spreadsheets/d/${ctx.spreadsheetId}`, sessionId: ctx.sessionId, type: 'transform' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19264,
+        13800
+      ],
+      "id": "tr-d-response",
+      "name": "📨 Réponse Calcul"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.sheetName + '!1:1') }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18064,
+        14100
+      ],
+      "id": "tr-e-read",
+      "name": "📥 Lire en-têtes (Format)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const action = $('🔀 Type de transformation').first().json;\nconst headers = (items[0].json.values || [[]])[0] || [];\nconst patterns = { DATE: {type:'DATE', pattern:'yyyy-mm-dd'}, CURRENCY: {type:'CURRENCY', pattern:'#,##0.00 €'}, PERCENT: {type:'PERCENT', pattern:'0.00%'}, NUMBER: {type:'NUMBER', pattern:'#,##0.00'}, TEXT: {type:'TEXT'} };\nconst fmt = patterns[action.numberFormat] || patterns.NUMBER;\nconst cols = (action.columns||[]).map(c => String(c).trim().toLowerCase());\nconst idxs = headers.map((h,i)=>[String(h).trim().toLowerCase(), i]).filter(([h])=>cols.includes(h)).map(([,i])=>i);\nconst requests = idxs.map(i => ({ repeatCell: { range: { sheetId: action.sheetGid, startRowIndex: 1, startColumnIndex: i, endColumnIndex: i + 1 }, cell: { userEnteredFormat: { numberFormat: fmt } }, fields: 'userEnteredFormat.numberFormat' } }));\nreturn [{ json: { spreadsheetId: action.spreadsheetId, body: { requests }, columns: action.columns, numberFormat: action.numberFormat, sessionId: action.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18464,
+        14100
+      ],
+      "id": "tr-e-code",
+      "name": "🎨 Résoudre colonnes format"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18864,
+        14100
+      ],
+      "id": "tr-e-format",
+      "name": "🎨 Appliquer format",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('🎨 Résoudre colonnes format').first().json;\nreturn [{ json: { text: `🎨 Format ${ctx.numberFormat} appliqué sur ${JSON.stringify(ctx.columns)}.\\n🔗 Vérifier : https://docs.google.com/spreadsheets/d/${ctx.spreadsheetId}`, sessionId: ctx.sessionId, type: 'transform' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19264,
+        14100
+      ],
+      "id": "tr-e-response",
+      "name": "📨 Réponse Format"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}/values/{{ encodeURIComponent($json.sheetName) }}?majorDimension=ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18064,
+        14400
+      ],
+      "id": "tr-f-read",
+      "name": "📥 Lire valeurs (Pivot)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const action = $('🔀 Type de transformation').first().json;\nconst values = items[0].json.values || [];\nconst headers = values[0] || [];\nconst rowCount = values.length; const colCount = headers.length;\nconst idx = name => headers.findIndex(h => String(h).trim().toLowerCase() === String(name).trim().toLowerCase());\nconst pivotRows = (action.pivotRows||[]).map(c => ({ sourceColumnOffset: idx(c), showTotals: true, sortOrder: 'ASCENDING' })).filter(r=>r.sourceColumnOffset>=0);\nconst pivotValues = (action.pivotValues||[]).map(c => ({ sourceColumnOffset: idx(c), summarizeFunction: action.pivotAggregation || 'SUM' })).filter(v=>v.sourceColumnOffset>=0);\nconst newSheetId = Math.floor(Date.now()/1000) % 2000000000;\nconst newSheetTitle = `TCD_${newSheetId}`;\nconst body = { requests: [\n  { addSheet: { properties: { sheetId: newSheetId, title: newSheetTitle } } },\n  { updateCells: { rows: [{ values: [{ pivotTable: { source: { sheetId: action.sheetGid, startRowIndex: 0, startColumnIndex: 0, endRowIndex: rowCount, endColumnIndex: colCount }, rows: pivotRows, values: pivotValues } }] }], start: { sheetId: newSheetId, rowIndex: 0, columnIndex: 0 }, fields: 'pivotTable' } }\n] };\nreturn [{ json: { spreadsheetId: action.spreadsheetId, body, newSheetTitle, sessionId: action.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18464,
+        14400
+      ],
+      "id": "tr-f-code",
+      "name": "📊 Construire requête TCD"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        18864,
+        14400
+      ],
+      "id": "tr-f-create",
+      "name": "📊 Créer TCD",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('📊 Construire requête TCD').first().json;\nreturn [{ json: { text: `📊 TCD créé dans un nouvel onglet « ${ctx.newSheetTitle} ».\\n🔗 Vérifier : https://docs.google.com/spreadsheets/d/${ctx.spreadsheetId}`, sessionId: ctx.sessionId, type: 'transform' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19264,
+        14400
+      ],
+      "id": "tr-f-response",
+      "name": "📨 Réponse TCD"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE etl_sessions SET status = 'ready', updated_at = NOW() WHERE session_id = $1",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        19664,
+        13800
+      ],
+      "id": "tr-update-session",
+      "name": "💾 Update Session (Transform)",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'transform', 'transformation_appliquee', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({ text: $json.text }) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        20064,
+        13800
+      ],
+      "id": "tr-trace",
+      "name": "💾 Trace Transform → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "# 🔎 CONSULT\nRenvoie à tout moment le lien de la copie\nde travail Google Sheet pour vérification.",
+        "height": 160,
+        "width": 400,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        14850
+      ],
+      "typeVersion": 1,
+      "id": "cs-sticky",
+      "name": "📋 Note Consultation"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT spreadsheet_id, file_name FROM etl_sessions WHERE session_id = $1",
+        "options": {
+          "queryReplacement": [
+            "={{ $('session id').first().json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        14864,
+        15000
+      ],
+      "id": "cs-read-session",
+      "name": "📥 Lire Session (Consult)",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = items[0]?.json;\nconst sessionId = $('session id').first().json.sessionId;\nif (!row || !row.spreadsheet_id) {\n  return [{ json: { text: \"⚠️ Aucun fichier en cours. Choisissez d'abord un fichier à traiter.\", sessionId, type: 'consult' } }];\n}\nreturn [{ json: { text: `🔎 Fichier en cours : ${row.file_name}\\n🔗 Copie de travail (vérifiez en direct) :\\nhttps://docs.google.com/spreadsheets/d/${row.spreadsheet_id}`, sessionId, type: 'consult' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15264,
+        15000
+      ],
+      "id": "cs-response",
+      "name": "📨 Réponse Consult"
+    },
+    {
+      "parameters": {
+        "content": "# ❓ QUESTION — Stats réelles (sans BigQuery)\nLes statistiques (somme, moyenne, comptage, valeurs\ndistinctes) sont calculées de façon déterministe\nà partir des vraies valeurs du Google Sheet, puis\nl'agent LLM formule la réponse en langage naturel\nSANS jamais inventer de chiffre.",
+        "height": 200,
+        "width": 560,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        15250
+      ],
+      "typeVersion": 1,
+      "id": "qs-sticky",
+      "name": "📋 Note Question"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT spreadsheet_id, file_name FROM etl_sessions WHERE session_id = $1",
+        "options": {
+          "queryReplacement": [
+            "={{ $('session id').first().json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        14864,
+        15550
+      ],
+      "id": "qs-read-session",
+      "name": "📥 Lire Session (Question)",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = items[0]?.json;\nconst sessionId = $('session id').first().json.sessionId;\nconst chatInput = $('session id').first().json.chatInput;\nif (!row || !row.spreadsheet_id) {\n  return [{ json: { sessionStatus: 'missing', sessionId, text: \"⚠️ Aucun fichier sélectionné pour l'instant.\" } }];\n}\nreturn [{ json: { sessionStatus: 'ready', spreadsheetId: row.spreadsheet_id, fileName: row.file_name, sessionId, chatInput } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15264,
+        15550
+      ],
+      "id": "qs-check-session",
+      "name": "🔎 Vérifier session (Question)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.sessionStatus }}",
+              "rightValue": "missing",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        15664,
+        15550
+      ],
+      "id": "qs-if-session",
+      "name": "A un fichier ? (Question)"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { text: items[0].json.text, sessionId: items[0].json.sessionId, type: 'question' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        15750
+      ],
+      "id": "qs-no-session",
+      "name": "⚠️ Réponse Sans Fichier (Question)"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}?fields=sheets.properties",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16064,
+        15450
+      ],
+      "id": "qs-list-sheets",
+      "name": "📑 Lister feuilles (Question)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $('🔎 Vérifier session (Question)').item.json.spreadsheetId }}/values/{{ encodeURIComponent(($json.sheets || [{properties:{title:'Sheet1'}}])[0].properties.title) }}?majorDimension=ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16464,
+        15450
+      ],
+      "id": "qs-read-values",
+      "name": "📥 Lire valeurs (Question)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = items[0].json;\nconst values = data.values || [];\nconst headers = values[0] || [];\nconst rows = values.slice(1);\nconst stats = {};\nheaders.forEach((h, i) => {\n  const colVals = rows.map(r => r[i]).filter(v => v !== undefined && v !== '');\n  const numeric = colVals.filter(v => v !== '' && !isNaN(parseFloat(v)) && isFinite(v)).map(Number);\n  const distinct = new Set(colVals.map(String));\n  if (numeric.length > colVals.length * 0.6 && numeric.length > 0) {\n    stats[h] = { non_empty: colVals.length, distinct: distinct.size, sum: +numeric.reduce((a,b)=>a+b,0).toFixed(2), avg: +(numeric.reduce((a,b)=>a+b,0)/numeric.length).toFixed(2), min: Math.min(...numeric), max: Math.max(...numeric) };\n  } else {\n    stats[h] = { non_empty: colVals.length, distinct: distinct.size, top_values: [...distinct].slice(0,5) };\n  }\n});\nconst sheetName = (data.range||'').split('!')[0].replace(/'/g,'') || 'Sheet1';\nreturn [{ json: { totalRows: rows.length, totalColumns: headers.length, columnStats: stats, sheetName } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16864,
+        15450
+      ],
+      "id": "qs-compute-stats",
+      "name": "🧮 Calculer statistiques"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu es l'agent d'analyse ETL Flowrecom.\nFichier : {{ $('🔎 Vérifier session (Question)').item.json.fileName }}, feuille analysée : {{ $json.sheetName }}.\nNombre total de lignes : {{ $json.totalRows }}, colonnes : {{ $json.totalColumns }}.\nStatistiques réelles calculées par colonne :\n{{ JSON.stringify($json.columnStats).substring(0, 3000) }}\n\nQuestion utilisateur : {{ $('session id').first().json.chatInput }}\n\nRéponds en te basant UNIQUEMENT sur ces statistiques réelles fournies ci-dessus. N'invente JAMAIS un chiffre qui n'y figure pas.\nRéponds en JSON : {\"response\":\"<réponse détaillée en français>\"}",
+        "options": {
+          "systemMessage": "Tu es expert en analyse de données. Utilise uniquement les statistiques réelles fournies dans le prompt, jamais d'invention de chiffres."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        17264,
+        15450
+      ],
+      "id": "9fd04eca-67d8-454b-9b85-0c72e9431fe3",
+      "name": "agent d'extraction de donnés",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        17264,
+        15650
+      ],
+      "id": "0b8965f5-2201-436b-9002-ab737a3eb7ca",
+      "name": "Groq Chat Model5",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('session id').item.json.sessionId }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        17064,
+        15650
+      ],
+      "id": "e1b028fa-e709-49fc-954f-c4b49a2013dc",
+      "name": "Simple Memory3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nlet result;\ntry { result = JSON.parse(raw.replace(/```json|```/g,'').trim()); } catch(e) { result = { response: raw }; }\nreturn [{ json: { text: result.response || raw, type: 'question', sessionId: items[0].json.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17664,
+        15450
+      ],
+      "id": "3cf015e9-fdaa-4b4e-9f26-6f4122209b6d",
+      "name": "parser5"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'question', 'question_answered', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({ question: $('session id').first().json.chatInput }) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        18064,
+        15450
+      ],
+      "id": "570db064-4415-4e03-8615-394d54ed782e",
+      "name": "💾 Trace Analyse → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "# 📈 VISUALISATION — Stats réelles\nMême principe que la branche question :\nstatistiques calculées de façon déterministe,\npuis l'agent LLM propose une config de charts.",
+        "height": 160,
+        "width": 460,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        16000
+      ],
+      "typeVersion": 1,
+      "id": "vz-sticky",
+      "name": "📋 Note Visualisation"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT spreadsheet_id, file_name FROM etl_sessions WHERE session_id = $1",
+        "options": {
+          "queryReplacement": [
+            "={{ $('session id').first().json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        14864,
+        16150
+      ],
+      "id": "vz-read-session",
+      "name": "📥 Lire Session (Visu)",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = items[0]?.json;\nconst sessionId = $('session id').first().json.sessionId;\nconst chatInput = $('session id').first().json.chatInput;\nif (!row || !row.spreadsheet_id) {\n  return [{ json: { sessionStatus: 'missing', sessionId, text: \"⚠️ Aucun fichier sélectionné pour l'instant.\" } }];\n}\nreturn [{ json: { sessionStatus: 'ready', spreadsheetId: row.spreadsheet_id, fileName: row.file_name, sessionId, chatInput } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15264,
+        16150
+      ],
+      "id": "vz-check-session",
+      "name": "🔎 Vérifier session (Visu)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.sessionStatus }}",
+              "rightValue": "missing",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        15664,
+        16150
+      ],
+      "id": "vz-if-session",
+      "name": "A un fichier ? (Visu)"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { text: items[0].json.text, sessionId: items[0].json.sessionId, type: 'visualisation' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        16350
+      ],
+      "id": "vz-no-session",
+      "name": "⚠️ Réponse Sans Fichier (Visu)"
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.spreadsheetId }}?fields=sheets.properties",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16064,
+        16050
+      ],
+      "id": "vz-list-sheets",
+      "name": "📑 Lister feuilles (Visu)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $('🔎 Vérifier session (Visu)').item.json.spreadsheetId }}/values/{{ encodeURIComponent(($json.sheets || [{properties:{title:'Sheet1'}}])[0].properties.title) }}?majorDimension=ROWS",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        16464,
+        16050
+      ],
+      "id": "vz-read-values",
+      "name": "📥 Lire valeurs (Visu)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FqtsDonFeIaEWR7B",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = items[0].json;\nconst values = data.values || [];\nconst headers = values[0] || [];\nconst rows = values.slice(1);\nconst stats = {};\nheaders.forEach((h, i) => {\n  const colVals = rows.map(r => r[i]).filter(v => v !== undefined && v !== '');\n  const numeric = colVals.filter(v => v !== '' && !isNaN(parseFloat(v)) && isFinite(v)).map(Number);\n  const distinct = new Set(colVals.map(String));\n  if (numeric.length > colVals.length * 0.6 && numeric.length > 0) {\n    stats[h] = { non_empty: colVals.length, distinct: distinct.size, sum: +numeric.reduce((a,b)=>a+b,0).toFixed(2), avg: +(numeric.reduce((a,b)=>a+b,0)/numeric.length).toFixed(2), min: Math.min(...numeric), max: Math.max(...numeric) };\n  } else {\n    stats[h] = { non_empty: colVals.length, distinct: distinct.size, top_values: [...distinct].slice(0,5) };\n  }\n});\nreturn [{ json: { totalRows: rows.length, totalColumns: headers.length, columnStats: stats } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16864,
+        16050
+      ],
+      "id": "vz-compute-stats",
+      "name": "🧮 Calculer stats (Visu)"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tu es l'agent de visualisation Flowrecom.\nStatistiques réelles : {{ JSON.stringify($json.columnStats).substring(0, 2500) }}\nDemande : {{ $('session id').item.json.chatInput }}\n\nRetourne UNIQUEMENT ce JSON :\n{\n  \"charts\": [ { \"type\": \"bar|line|pie\", \"title\": \"Titre\", \"data\": { \"labels\": [...], \"values\": [...] }, \"insight\": \"Insight\" } ],\n  \"summary\": \"Résumé\",\n  \"key_metrics\": { \"total_rows\": {{ $json.totalRows }} }\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        17264,
+        16050
+      ],
+      "id": "808300a2-feea-4563-9ecf-3348406f0d5f",
+      "name": "📊 Agent Visualisation"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        17264,
+        16250
+      ],
+      "id": "435938cf-8622-4c39-863a-ceb1c9d0c3e8",
+      "name": "Groq Chat Model3",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nlet chartsConfig;\ntry { chartsConfig = JSON.parse(raw.replace(/```json|```/g,'').trim()); } catch(e) { chartsConfig = { charts: [], summary: 'Données analysées.', key_metrics: {} }; }\nreturn [{ json: { charts: chartsConfig.charts || [], summary: chartsConfig.summary || '', key_metrics: chartsConfig.key_metrics || {}, type: 'visualisation', sessionId: items[0].json.sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17664,
+        16050
+      ],
+      "id": "7b5bbe20-26b9-4bdf-bec0-6859719197c5",
+      "name": "parser visu"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'visualisation', 'charts_generated', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({ charts_count: $json.charts.length }) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        18064,
+        16050
+      ],
+      "id": "0c36fb96-8d51-4428-8dc7-a12a30edd9f4",
+      "name": "💾 Trace Visualisation → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Demande de partage : {{ $json.chatInput }}\nDétermine le canal : email, whatsapp, linkedin, teams, slack.\nRetourne JSON : {\"channel\":\"<canal>\",\"message\":\"<message>\",\"subject\":\"<sujet si email>\"}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        14864,
+        16700
+      ],
+      "id": "424caa75-b850-45e2-86b7-5e446dd269af",
+      "name": "🔀 Router Sharing"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        14864,
+        16900
+      ],
+      "id": "cc449497-257c-492a-96c7-150814ad471b",
+      "name": "Groq Chat Model2",
+      "credentials": {
+        "groqApi": {
+          "id": "crtvddQmqVIQYUVI",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.output || '{}';\nlet result;\ntry { result = JSON.parse(raw.replace(/```json|```/g,'').trim()); } catch(e) { result = { channel: 'email', message: 'Résultats ETL Flowrecom', subject: 'Rapport ETL' }; }\nreturn [{ json: { ...result, sessionId: items[0].json.sessionId, type: 'sharing', text: `✅ Partage préparé pour ${result.channel}` } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15264,
+        16700
+      ],
+      "id": "0c1d7aeb-ecb6-4cd1-887c-d8b3d6de4a97",
+      "name": "parser sharing"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'sharing', 'share_prepared', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({ channel: $json.channel }) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        15664,
+        16700
+      ],
+      "id": "d684f607-b60f-41d1-b360-e5ba1ad631df",
+      "name": "💾 Trace Sharing → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "# 📦 LOADING — Chargement multi-destination\n1. Exporte la copie de travail Google Sheet en .xlsx\n2. 💽 Local : C:\\Users\\Hanen GB\\Desktop\\n8n ETL\\output\\\n   (nécessite N8N_RESTRICT_FILE_ACCESS_TO configuré si restreint)\n3. ☁️ Drive Final : dossier <FINAL_FOLDER_ID>\n4. 📎 SharePoint : PUT Microsoft Graph vers <SHAREPOINT_SITE_ID>\n   → créez la credential OAuth2 'SharePoint account' dans n8n\n   avant d'utiliser cette destination (voir instructions fournies).\nLes 3 destinations utilisent onError=continueErrorOutput :\nune destination en échec ne bloque pas les autres.",
+        "height": 300,
+        "width": 620,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        14464,
+        17300
+      ],
+      "typeVersion": 1,
+      "id": "ld-sticky",
+      "name": "📋 Note Chargement"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT spreadsheet_id, file_name FROM etl_sessions WHERE session_id = $1",
+        "options": {
+          "queryReplacement": [
+            "={{ $('session id').first().json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        14864,
+        17650
+      ],
+      "id": "ld-read-session",
+      "name": "📥 Lire Session (Loading)",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = items[0]?.json;\nconst sessionId = $('session id').first().json.sessionId;\nif (!row || !row.spreadsheet_id) {\n  return [{ json: { sessionStatus: 'missing', sessionId, text: \"⚠️ Aucun fichier à charger pour l'instant.\" } }];\n}\nreturn [{ json: { sessionStatus: 'ready', spreadsheetId: row.spreadsheet_id, fileName: row.file_name, sessionId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15264,
+        17650
+      ],
+      "id": "ld-check-session",
+      "name": "🔎 Vérifier session (Loading)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.sessionStatus }}",
+              "rightValue": "missing",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        15664,
+        17650
+      ],
+      "id": "ld-if-session",
+      "name": "A un fichier ? (Loading)"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { text: items[0].json.text, sessionId: items[0].json.sessionId, type: 'loading' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16064,
+        17850
+      ],
+      "id": "ld-no-session",
+      "name": "⚠️ Réponse Sans Fichier (Loading)"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.spreadsheetId }}",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data",
+          "googleFileConversion": {
+            "conversion": {
+              "sheetsToFormat": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        16064,
+        17550
+      ],
+      "id": "ld-export",
+      "name": "📤 Exporter Sheet en XLSX",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YbmaHFZdRHuKkPFU",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $('🔎 Vérifier session (Loading)').first().json;\nconst date = new Date().toISOString().slice(0,10);\nconst base = row.fileName.replace(/\\.[^.]+$/, '');\nconst finalName = `FINAL_${base}_${date}.xlsx`;\nconst binary = items[0].binary;\nbinary.data.fileName = finalName;\nbinary.data.mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';\nreturn [{ json: { finalName, sessionId: row.sessionId }, binary }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16464,
+        17550
+      ],
+      "id": "ld-rename",
+      "name": "🏷️ Nommer fichier final"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=C:\\Users\\Hanen GB\\Desktop\\n8n ETL\\output\\{{ $json.finalName }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        16864,
+        17550
+      ],
+      "id": "ld-local",
+      "name": "💽 Sauvegarder en Local",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "operation": "upload",
+        "name": "={{ $json.finalName }}",
+        "driveId": {
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "<FINAL_FOLDER_ID>",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        17264,
+        17550
+      ],
+      "id": "ld-drive-final",
+      "name": "☁️ Copier vers Drive Final",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YbmaHFZdRHuKkPFU",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://graph.microsoft.com/v1.0/sites/<SHAREPOINT_SITE_ID>/drive/root:/ETL_Final/{{ $json.finalName }}:/content",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        17664,
+        17550
+      ],
+      "id": "ld-sharepoint",
+      "name": "📎 Charger vers SharePoint",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE etl_sessions SET status = 'loaded', updated_at = NOW() WHERE session_id = $1",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        18064,
+        17550
+      ],
+      "id": "ld-update-session",
+      "name": "💾 Update Session (Loaded)",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO etl_tracabilite (session_id, agent, step, status, output_data, created_at) VALUES ($1, 'loading', 'export_multi_destination', 'OK', $2, NOW());",
+        "options": {
+          "queryReplacement": [
+            "={{ $json.sessionId }}",
+            "={{ JSON.stringify({ finalName: $json.finalName }) }}"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        18464,
+        17550
+      ],
+      "id": "ld-trace",
+      "name": "💾 Trace Loading → BDD",
+      "credentials": {
+        "postgres": {
+          "id": "bfGNywILvkZEo1lx",
+          "name": "Postgres Local (flowrecom)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const finalName = $('🏷️ Nommer fichier final').first().json.finalName;\nconst sessionId = $('session id').first().json.sessionId;\nreturn [{ json: {\n  text: `✅ Chargement terminé !\\n\\n📄 Fichier : ${finalName}\\n💽 Local : C:\\\\Users\\\\Hanen GB\\\\Desktop\\\\n8n ETL\\\\output\\\\${finalName}\\n☁️ Google Drive (Final) : dossier Flowrecom/Final\\n📎 SharePoint : voir logs d'exécution (nécessite credential configurée)\\n\\nLe fichier nettoyé et transformé est prêt.`,\n  sessionId, type: 'loading'\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        18864,
+        17550
+      ],
+      "id": "ld-response",
+      "name": "📨 Réponse Loading"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = items[0].json;\nconst response = {\n  text: item.text || item.response || 'Traitement terminé.',\n  type: item.type || 'general',\n  sessionId: item.sessionId,\n  charts: item.charts || null,\n  key_metrics: item.key_metrics || null,\n  summary: item.summary || null,\n  timestamp: new Date().toISOString()\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        19664,
+        10640
+      ],
+      "id": "830c378e-6ace-4713-a1ce-89634f6a6e01",
+      "name": "🔀 Agréger réponse finale"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        20064,
+        10640
+      ],
+      "id": "941ba018-be14-4a75-9118-076d49beaa5f",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "session id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "session id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "session id": {
+      "main": [
+        [
+          {
+            "node": "agent parent Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agent parent Router": {
+      "main": [
+        [
+          {
+            "node": "text->json",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agent parent Router",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "text->json": {
+      "main": [
+        [
+          {
+            "node": "select_file,transform,question,visu,sharing,loading,consult,conversation ?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "💾 Trace Orchestrateur → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "select_file,transform,question,visu,sharing,loading,consult,conversation ?": {
+      "main": [
+        [
+          {
+            "node": "🔎 Détecter nom de fichier",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "agent de conversation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire Session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire Session (Question)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire Session (Visu)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🔀 Router Sharing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire Session (Loading)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire Session (Consult)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Détecter nom de fichier": {
+      "main": [
+        [
+          {
+            "node": "A un nom de fichier ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A un nom de fichier ?": {
+      "main": [
+        [
+          {
+            "node": "extraire nom de fichier",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search files and folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agent de conversation": {
+      "main": [
+        [
+          {
+            "node": "parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agent de conversation",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "agent de conversation",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parser": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search files and folders": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extraire nom de fichier": {
+      "main": [
+        [
+          {
+            "node": "extraire seulemnt le fichier excel choisi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extraire seulemnt le fichier excel choisi": {
+      "main": [
+        [
+          {
+            "node": "🗂️ Copier vers Working",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗂️ Copier vers Working": {
+      "main": [
+        [
+          {
+            "node": "extraire spreadsheet id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extraire spreadsheet id": {
+      "main": [
+        [
+          {
+            "node": "extract sheet ids1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extract sheet ids1": {
+      "main": [
+        [
+          {
+            "node": "retourne noms de sheets1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "retourne noms de sheets1": {
+      "main": [
+        [
+          {
+            "node": "📋 Résumer sélection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Résumer sélection": {
+      "main": [
+        [
+          {
+            "node": "💾 Upsert Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Upsert Session": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire Session (Transform)": {
+      "main": [
+        [
+          {
+            "node": "🔎 Vérifier session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Vérifier session (Transform)": {
+      "main": [
+        [
+          {
+            "node": "A un fichier ? (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A un fichier ? (Transform)": {
+      "main": [
+        [
+          {
+            "node": "⚠️ Réponse Sans Fichier (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🤖 Agent Parseur Transformation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚠️ Réponse Sans Fichier (Transform)": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 Agent Parseur Transformation": {
+      "main": [
+        [
+          {
+            "node": "🧩 Parser action transformation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model — Transform": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🤖 Agent Parseur Transformation",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧩 Parser action transformation": {
+      "main": [
+        [
+          {
+            "node": "📑 Lister feuilles (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📑 Lister feuilles (Transform)": {
+      "main": [
+        [
+          {
+            "node": "🔎 Résoudre feuille cible",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Résoudre feuille cible": {
+      "main": [
+        [
+          {
+            "node": "🔀 Type de transformation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Type de transformation": {
+      "main": [
+        [
+          {
+            "node": "📥 Lire valeurs (Clean)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire valeurs (Dates)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire valeurs (Dedupe)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire valeurs (Calc)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire en-têtes (Format)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Lire valeurs (Pivot)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❓ Action non reconnue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Action non reconnue": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire valeurs (Clean)": {
+      "main": [
+        [
+          {
+            "node": "🧹 Nettoyer texte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧹 Nettoyer texte": {
+      "main": [
+        [
+          {
+            "node": "✏️ Écrire valeurs (Clean)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✏️ Écrire valeurs (Clean)": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse Clean",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse Clean": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire valeurs (Dates)": {
+      "main": [
+        [
+          {
+            "node": "📅 Normaliser dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📅 Normaliser dates": {
+      "main": [
+        [
+          {
+            "node": "✏️ Écrire valeurs (Dates)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✏️ Écrire valeurs (Dates)": {
+      "main": [
+        [
+          {
+            "node": "🎨 Préparer format Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎨 Préparer format Dates": {
+      "main": [
+        [
+          {
+            "node": "🎨 Appliquer format Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎨 Appliquer format Dates": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse Dates": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire valeurs (Dedupe)": {
+      "main": [
+        [
+          {
+            "node": "🧹 Supprimer doublons",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧹 Supprimer doublons": {
+      "main": [
+        [
+          {
+            "node": "✏️ Écrire valeurs (Dedupe)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✏️ Écrire valeurs (Dedupe)": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse Dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse Dedupe": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire valeurs (Calc)": {
+      "main": [
+        [
+          {
+            "node": "🧮 Construire colonne calculée",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧮 Construire colonne calculée": {
+      "main": [
+        [
+          {
+            "node": "✏️ Écrire formule (Calc)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✏️ Écrire formule (Calc)": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse Calcul",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse Calcul": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire en-têtes (Format)": {
+      "main": [
+        [
+          {
+            "node": "🎨 Résoudre colonnes format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎨 Résoudre colonnes format": {
+      "main": [
+        [
+          {
+            "node": "🎨 Appliquer format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎨 Appliquer format": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse Format": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire valeurs (Pivot)": {
+      "main": [
+        [
+          {
+            "node": "📊 Construire requête TCD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Construire requête TCD": {
+      "main": [
+        [
+          {
+            "node": "📊 Créer TCD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Créer TCD": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse TCD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse TCD": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session (Transform)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Update Session (Transform)": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Transform → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Transform → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire Session (Consult)": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse Consult",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse Consult": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire Session (Question)": {
+      "main": [
+        [
+          {
+            "node": "🔎 Vérifier session (Question)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Vérifier session (Question)": {
+      "main": [
+        [
+          {
+            "node": "A un fichier ? (Question)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A un fichier ? (Question)": {
+      "main": [
+        [
+          {
+            "node": "⚠️ Réponse Sans Fichier (Question)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📑 Lister feuilles (Question)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚠️ Réponse Sans Fichier (Question)": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📑 Lister feuilles (Question)": {
+      "main": [
+        [
+          {
+            "node": "📥 Lire valeurs (Question)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire valeurs (Question)": {
+      "main": [
+        [
+          {
+            "node": "🧮 Calculer statistiques",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧮 Calculer statistiques": {
+      "main": [
+        [
+          {
+            "node": "agent d'extraction de donnés",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "agent d'extraction de donnés": {
+      "main": [
+        [
+          {
+            "node": "parser5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "agent d'extraction de donnés",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory3": {
+      "ai_memory": [
+        [
+          {
+            "node": "agent d'extraction de donnés",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parser5": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Analyse → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Analyse → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire Session (Visu)": {
+      "main": [
+        [
+          {
+            "node": "🔎 Vérifier session (Visu)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Vérifier session (Visu)": {
+      "main": [
+        [
+          {
+            "node": "A un fichier ? (Visu)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A un fichier ? (Visu)": {
+      "main": [
+        [
+          {
+            "node": "⚠️ Réponse Sans Fichier (Visu)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📑 Lister feuilles (Visu)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚠️ Réponse Sans Fichier (Visu)": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📑 Lister feuilles (Visu)": {
+      "main": [
+        [
+          {
+            "node": "📥 Lire valeurs (Visu)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire valeurs (Visu)": {
+      "main": [
+        [
+          {
+            "node": "🧮 Calculer stats (Visu)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧮 Calculer stats (Visu)": {
+      "main": [
+        [
+          {
+            "node": "📊 Agent Visualisation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Agent Visualisation": {
+      "main": [
+        [
+          {
+            "node": "parser visu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "📊 Agent Visualisation",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parser visu": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Visualisation → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Visualisation → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Router Sharing": {
+      "main": [
+        [
+          {
+            "node": "parser sharing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "🔀 Router Sharing",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parser sharing": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Sharing → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Sharing → BDD": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Lire Session (Loading)": {
+      "main": [
+        [
+          {
+            "node": "🔎 Vérifier session (Loading)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Vérifier session (Loading)": {
+      "main": [
+        [
+          {
+            "node": "A un fichier ? (Loading)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A un fichier ? (Loading)": {
+      "main": [
+        [
+          {
+            "node": "⚠️ Réponse Sans Fichier (Loading)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📤 Exporter Sheet en XLSX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚠️ Réponse Sans Fichier (Loading)": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 Exporter Sheet en XLSX": {
+      "main": [
+        [
+          {
+            "node": "🏷️ Nommer fichier final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏷️ Nommer fichier final": {
+      "main": [
+        [
+          {
+            "node": "💽 Sauvegarder en Local",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💽 Sauvegarder en Local": {
+      "main": [
+        [
+          {
+            "node": "☁️ Copier vers Drive Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "☁️ Copier vers Drive Final": {
+      "main": [
+        [
+          {
+            "node": "📎 Charger vers SharePoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📎 Charger vers SharePoint": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session (Loaded)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Update Session (Loaded)": {
+      "main": [
+        [
+          {
+            "node": "💾 Trace Loading → BDD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Trace Loading → BDD": {
+      "main": [
+        [
+          {
+            "node": "📨 Réponse Loading",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Réponse Loading": {
+      "main": [
+        [
+          {
+            "node": "🔀 Agréger réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Agréger réponse finale": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b3f1a001-agentic-excel-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "6ef1e333ac5194da2f53aa69dd299897b89fd4c6b90f3e04e71baf3f17755f4f"
+  },
+  "id": "flowrecom-excel-agentic-v2",
+  "tags": []
+}

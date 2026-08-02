@@ -1,0 +1,25 @@
+# Secrets / credentials — never commit these
+.env
+*.env
+*credential*.json
+*_key.json
+*service-account*.json
+*.pem
+*.key
+
+# n8n runtime data (contains encrypted credentials / DB)
+.n8n/
+
+# Claude Code local settings (can capture API keys used in commands)
+.claude/
+
+# Logs and local runtime artifacts
+*.log
+n8n_start.log
+
+# Temp/scratch files used during development
+_*.json
+
+# OS noise
+Thumbs.db
+Desktop.ini
