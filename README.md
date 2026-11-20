@@ -76,7 +76,7 @@ docs/USAGE.md                                   Example conversations per intent
 2. n8n credentials to configure: Groq, Google Drive OAuth2, Google Sheets OAuth2, Google OAuth2 (generic), Postgres.
 3. Run `etl_sessions.sql` against the Postgres database in use.
 4. In Google Drive, create a source folder (raw Excel files) plus 2 subfolders `Working` and `Final`.
-5. Import `Flowrecom ETL — Excel Agentic v2.json` into n8n, replace the `<WORKING_FOLDER_ID>` / `<FINAL_FOLDER_ID>` / `<SHAREPOINT_SITE_ID>` placeholders.
+5. Import `Flowrecom ETL — Excel Agentic v2.json` into n8n, replace the `<WORKING_FOLDER_ID>` / `<FINAL_FOLDER_ID>` / `<SHAREPOINT_SITE_ID>` / `<LOCAL_OUTPUT_DIR>` placeholders.
 
 Full step-by-step guide: [`docs/SETUP.md`](docs/SETUP.md).
 

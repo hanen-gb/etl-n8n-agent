@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "# 🤖 FLOWRECOM — Agent ETL Excel agentique\n\n## Architecture\n- ✅ Fichiers bruts dans Drive `Flowrecom` (id 11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy)\n- ✅ Copie de travail auto dans `Flowrecom/Working` → convertie en Google Sheet\n- ✅ Transformations réelles via Google Sheets API (upper/lower, dates, doublons, colonnes calculées, formats, TCD natif)\n- ✅ Questions/statistiques calculées de façon déterministe (pas d'invention de chiffres par le LLM)\n- ✅ Consultation à tout moment via le lien Google Sheet\n- ✅ Chargement final multi-destination : Local + Drive `Final` + SharePoint\n- ✅ Postgres : `etl_sessions` (état courant) + `etl_tracabilite` (historique)\n\n## Credentials à configurer\n- `Groq account` → Groq API Key\n- `Google Drive account` → Drive OAuth2\n- `Google Sheets account 2` → Sheets OAuth2\n- `Google account` → OAuth2 générique (copie de fichiers Drive)\n- `Postgres account (supa)` → PostgreSQL/Supabase\n- `SharePoint account` (à créer par vous, voir note Chargement)\n\n## Paramètres à remplacer avant utilisation\n- `<WORKING_FOLDER_ID>` : id du sous-dossier Drive `Flowrecom/Working`\n- `<FINAL_FOLDER_ID>` : id du sous-dossier Drive `Flowrecom/Final`\n- `<SHAREPOINT_SITE_ID>` : id du site SharePoint cible\n- Chemin local de sortie : `C:\\Users\\Hanen GB\\Desktop\\n8n ETL\\output\\` (à créer sur le disque)\n\n## SQL à exécuter\nVoir `etl_sessions.sql` fourni à côté de ce workflow.",
+        "content": "# 🤖 FLOWRECOM — Agent ETL Excel agentique\n\n## Architecture\n- ✅ Fichiers bruts dans Drive `Flowrecom` (id 11E_3kjVErG8JGbRmM3KiNVINR2yg-FAy)\n- ✅ Copie de travail auto dans `Flowrecom/Working` → convertie en Google Sheet\n- ✅ Transformations réelles via Google Sheets API (upper/lower, dates, doublons, colonnes calculées, formats, TCD natif)\n- ✅ Questions/statistiques calculées de façon déterministe (pas d'invention de chiffres par le LLM)\n- ✅ Consultation à tout moment via le lien Google Sheet\n- ✅ Chargement final multi-destination : Local + Drive `Final` + SharePoint\n- ✅ Postgres : `etl_sessions` (état courant) + `etl_tracabilite` (historique)\n\n## Credentials à configurer\n- `Groq account` → Groq API Key\n- `Google Drive account` → Drive OAuth2\n- `Google Sheets account 2` → Sheets OAuth2\n- `Google account` → OAuth2 générique (copie de fichiers Drive)\n- `Postgres account (supa)` → PostgreSQL/Supabase\n- `SharePoint account` (à créer par vous, voir note Chargement)\n\n## Paramètres à remplacer avant utilisation\n- `<WORKING_FOLDER_ID>` : id du sous-dossier Drive `Flowrecom/Working`\n- `<FINAL_FOLDER_ID>` : id du sous-dossier Drive `Flowrecom/Final`\n- `<SHAREPOINT_SITE_ID>` : id du site SharePoint cible\n- Chemin local de sortie : `<LOCAL_OUTPUT_DIR>/` (à créer sur le disque)\n\n## SQL à exécuter\nVoir `etl_sessions.sql` fourni à côté de ce workflow.",
         "height": 620,
         "width": 1000,
         "color": 4
@@ -2212,7 +2212,7 @@
     },
     {
       "parameters": {
-        "content": "# 📦 LOADING — Chargement multi-destination\n1. Exporte la copie de travail Google Sheet en .xlsx\n2. 💽 Local : C:\\Users\\Hanen GB\\Desktop\\n8n ETL\\output\\\n   (nécessite N8N_RESTRICT_FILE_ACCESS_TO configuré si restreint)\n3. ☁️ Drive Final : dossier <FINAL_FOLDER_ID>\n4. 📎 SharePoint : PUT Microsoft Graph vers <SHAREPOINT_SITE_ID>\n   → créez la credential OAuth2 'SharePoint account' dans n8n\n   avant d'utiliser cette destination (voir instructions fournies).\nLes 3 destinations utilisent onError=continueErrorOutput :\nune destination en échec ne bloque pas les autres.",
+        "content": "# 📦 LOADING — Chargement multi-destination\n1. Exporte la copie de travail Google Sheet en .xlsx\n2. 💽 Local : <LOCAL_OUTPUT_DIR>/n   (nécessite N8N_RESTRICT_FILE_ACCESS_TO configuré si restreint)\n3. ☁️ Drive Final : dossier <FINAL_FOLDER_ID>\n4. 📎 SharePoint : PUT Microsoft Graph vers <SHAREPOINT_SITE_ID>\n   → créez la credential OAuth2 'SharePoint account' dans n8n\n   avant d'utiliser cette destination (voir instructions fournies).\nLes 3 destinations utilisent onError=continueErrorOutput :\nune destination en échec ne bloque pas les autres.",
         "height": 300,
         "width": 620,
         "color": 3
@@ -2359,7 +2359,7 @@
     {
       "parameters": {
         "operation": "write",
-        "fileName": "=C:\\Users\\Hanen GB\\Desktop\\n8n ETL\\output\\{{ $json.finalName }}",
+        "fileName": "=<LOCAL_OUTPUT_DIR>/{{ $json.finalName }}",
         "dataPropertyName": "data",
         "options": {}
       },
@@ -2483,7 +2483,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const finalName = $('🏷️ Nommer fichier final').first().json.finalName;\nconst sessionId = $('session id').first().json.sessionId;\nreturn [{ json: {\n  text: `✅ Chargement terminé !\\n\\n📄 Fichier : ${finalName}\\n💽 Local : C:\\\\Users\\\\Hanen GB\\\\Desktop\\\\n8n ETL\\\\output\\\\${finalName}\\n☁️ Google Drive (Final) : dossier Flowrecom/Final\\n📎 SharePoint : voir logs d'exécution (nécessite credential configurée)\\n\\nLe fichier nettoyé et transformé est prêt.`,\n  sessionId, type: 'loading'\n}}];"
+        "jsCode": "const finalName = $('🏷️ Nommer fichier final').first().json.finalName;\nconst sessionId = $('session id').first().json.sessionId;\nreturn [{ json: {\n  text: `✅ Chargement terminé !\\n\\n📄 Fichier : ${finalName}\\n💽 Local : <LOCAL_OUTPUT_DIR>/${finalName}\\n☁️ Google Drive (Final) : dossier Flowrecom/Final\\n📎 SharePoint : voir logs d'exécution (nécessite credential configurée)\\n\\nLe fichier nettoyé et transformé est prêt.`,\n  sessionId, type: 'loading'\n}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
